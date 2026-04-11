@@ -125,29 +125,41 @@ Two levels of approval: **artifact-level** and **task-level**.
 
 ---
 
-## Open Questions for Implementation
+## Implementation Progress
 
-- Exact pull-up drawer / toggle UX for mobile feed
-- Feed grouping/filtering UI when multiple tasks are concurrent
-- Whether the feed should have a small unread activity indicator on the chat page (e.g. a dot on the feed toggle on mobile)
+### Done
+
+- [x] **Feed component** (`ActivityFeed.tsx`) — real-time activity stream in BoardChat split pane, 5s polling
+- [x] **Mobile feed drawer** — Sheet-based bottom drawer with floating toggle button on mobile
+- [x] **Event tier system** — Tier 1 (cards), Tier 2 (one-liners), Tier 3 (hidden by default)
+- [x] **FeedCard component** (`FeedCard.tsx`) — rich cards for tasks, approvals, new hires with colored left border, status chips
+- [x] **Status circle indicators** — Task cards use `StatusIcon`-style circles tied to task state (todo=blue, in_review=violet, done=green, etc.)
+- [x] **Agent icons** — `AgentIcon` lucide icons replace circle-letter avatars throughout the feed
+- [x] **Collapsed groups** — Sequential same-task events within 5min collapse into expandable "N updates to SKI-X"
+- [x] **Entrance animations** — New items slide in with fade via CSS keyframes
+- [x] **Active-work spinners** — Loader2 spinner on active heartbeat runs
+- [x] **Time-based fading** — Older items get reduced opacity, "Earlier" separator at 5min boundary
+- [x] **Contextual empty state** — Agent-state-aware messaging (all paused / no agents / active with pulse)
+- [x] **"Show all activity" toggle** — Reveals hidden tier-3 events via filter dropdown
+
+### Not Started
+
+- [ ] **Task Detail page** — Status banner, Artifacts tab, two-level approval model
+- [ ] **Nav badges** — Inbox/Artifacts badge logic based on event rules
+- [ ] **Tasks nav entry** — Separate Tasks page promoted from Inbox
+- [ ] **Artifacts page enhancement** — Organization by type/project/agent
+- [ ] **Inline chat links** — Agent responses include text links to created tasks
+
+## Open Questions
+
 - Work Products tab: card layout, what metadata to show per artifact type (PR vs. preview URL vs. document)
+- Whether the feed should have a small unread activity indicator on mobile (dot on toggle button)
 
-## Files Likely Affected
+## Key Files
 
-- `ui/src/pages/BoardChat.tsx` — split pane, feed integration, inline links in chat
-- `ui/src/pages/IssueDetail.tsx` — status banner, approval UX, work products tab
-- `ui/src/pages/Inbox.tsx` — filter to action-needed items only
-- `ui/src/pages/Artifacts.tsx` — organization by type/project/agent
-- `ui/src/components/ArtifactsPanel.tsx` — may evolve into the feed component
-- `ui/src/components/LiveRunWidget.tsx` — make more prominent as status banner
-- `ui/src/components/IssueDocumentsSection.tsx` — may merge with work products tab
-- `ui/src/components/` — new components for feed items, badges, mobile drawer, approval dialogs
-- `ui/src/api/issues.ts` — feed data sourcing, approval endpoints
-- Navigation/layout components — badge logic, responsive layout switching
-
-## Verification
-
-- Desktop: Chat with concierge → trigger task → verify feed card appears → click through to task detail → verify live status banner → verify work products tab shows artifacts → approve artifact individually → approve task (verify confirmation when unapproved artifacts remain) → verify task moves to done → verify artifact badges on nav
-- Mobile: Same flow, verify feed accessible via drawer/toggle, verify bottom tab badges
-- Approval edge cases: try approving task with changes-requested artifact (should warn), try approving task with all artifacts approved (no warning), approve task with unapproved artifacts (confirmation dialog)
-- Badge rules: Verify each event in the badging rules table produces correct badge behavior
+| File | Role |
+|------|------|
+| `ui/src/components/ActivityFeed.tsx` | Main feed: tiers, collapse, animation, filtering, empty state |
+| `ui/src/components/FeedCard.tsx` | Tier-1 cards: task created, approvals, new hires, status circles |
+| `ui/src/components/ActivityRow.tsx` | Tier-2 one-liners with agent icons and active spinners |
+| `ui/src/pages/BoardChat.tsx` | Split pane integration, mobile Sheet drawer |
