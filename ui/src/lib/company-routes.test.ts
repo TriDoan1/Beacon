@@ -20,4 +20,11 @@ describe("company routes", () => {
       "/execution-workspaces/workspace-123",
     );
   });
+
+  it("treats conference room paths as board routes that need a company prefix", () => {
+    expect(isBoardPathWithoutPrefix("/conference/history")).toBe(true);
+    expect(extractCompanyPrefixFromPath("/conference/history")).toBeNull();
+    expect(applyCompanyPrefix("/conference/history", "PAP")).toBe("/PAP/conference/history");
+    expect(applyCompanyPrefix("/conference/PAP-1551", "PAP")).toBe("/PAP/conference/PAP-1551");
+  });
 });

@@ -451,7 +451,7 @@ function IssueChatFallbackThread({
         </div>
       </div>
 
-      {messages.length === 0 ? (
+      {messages.length === 0 && emptyMessage.trim().length > 0 ? (
         <div className={cn(
           "text-center text-sm text-muted-foreground",
           variant === "embedded"
@@ -3632,6 +3632,7 @@ export function IssueChatThread({
     errorBoundaryResetVersionRef.current += 1;
   }
   const errorBoundaryResetKey = String(errorBoundaryResetVersionRef.current);
+  const shouldShowEmptyState = resolvedEmptyMessage.trim().length > 0;
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -3660,7 +3661,7 @@ export function IssueChatThread({
               data-testid="thread-viewport"
               className={variant === "embedded" ? "space-y-3" : "space-y-4"}
             >
-              {messages.length === 0 ? (
+              {messages.length === 0 && shouldShowEmptyState ? (
                 <div className={cn(
                   "text-center text-sm text-muted-foreground",
                   variant === "embedded"

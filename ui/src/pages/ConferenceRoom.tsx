@@ -313,7 +313,7 @@ export function ConferenceRoom() {
 
   return (
     <TooltipProvider>
-      <div className="mx-auto flex h-[calc(100vh-8.5rem)] min-h-[560px] max-w-5xl flex-col overflow-hidden">
+      <div className="flex h-[calc(100vh-8.5rem)] min-h-[560px] w-full max-w-5xl flex-col overflow-hidden">
         <div className="mb-3 flex h-11 shrink-0 items-center justify-between border-b border-border/80 bg-background">
           <div className="flex min-w-0 items-center gap-2">
             <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-muted/60">

@@ -1785,6 +1785,35 @@ describe("IssueChatThread", () => {
     });
   });
 
+  it("does not render an empty placeholder when the empty message is blank", () => {
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <IssueChatThread
+            comments={[]}
+            linkedRuns={[]}
+            timelineEvents={[]}
+            liveRuns={[]}
+            onAdd={async () => {}}
+            showComposer={false}
+            emptyMessage=""
+            enableLiveTranscriptPolling={false}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).toContain("Jump to latest");
+    expect(container.textContent).not.toContain("This issue conversation is empty");
+    expect(container.querySelector(".border-dashed")).toBeNull();
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("shows non-image attachment upload state in the composer after a drop", async () => {
     const root = createRoot(container);
     const onAttachImage = vi.fn(async (file: File) => ({
