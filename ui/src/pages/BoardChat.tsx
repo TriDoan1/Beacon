@@ -176,18 +176,13 @@ export function BoardChat() {
     setHasNewBelow(false);
   }, []);
 
-  // Welcome typing intro: play the typing animation before revealing the
-  // team lead's welcome bubble. Plays on every fresh mount while the
-  // conversation is still new; once the user has replied, the welcome
-  // shows immediately (no intro for return visits to an active chat).
+  // Welcome typing intro: staged reveal of typing → welcome bubble → chips.
+  // The timers don't start until the data needed to render the welcome is
+  // actually loaded, so the animation plays at the moment the user arrives
+  // at the chat (e.g. right after creating a new company) rather than
+  // burning off while a spinner is on screen.
   const [welcomeRevealed, setWelcomeRevealed] = useState(false);
-  /** Locks the typing-intro start time so that effect re-fires (e.g.
-   *  from new query data) don't reset the timer back to zero. */
-  const welcomeTimerStartRef = useRef<number | null>(null);
-  /** Minimum time the typing bubble stays visible before we reveal the
-   *  welcome. 2.5s feels intentional without stalling the first-arrival
-   *  experience. */
-  const WELCOME_TYPING_MS = 2500;
+  const [chipsRevealed, setChipsRevealed] = useState(false);
 
   // Reset state and clear cached comments when company changes. The
   // composer draft is NOT wiped — it's loaded from per-company
@@ -294,35 +289,47 @@ export function BoardChat() {
     .slice()
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-  // Reveal the welcome after a typing delay, once we have the data
-  // needed to render it. If the user has already replied in this
-  // conversation, skip the delay — the welcome isn't a "new" event.
-  //
-  // Depends on `comments` (stable ref via React Query) rather than the
-  // derived `sortedComments` (new array every render), so the effect
-  // doesn't re-fire on unrelated renders. The start time is anchored in
-  // a ref so any legitimate re-fire (new data) recomputes the remaining
-  // time from the original anchor instead of resetting to 0.
+  // Reset the staged reveal whenever the active company changes so a
+  // freshly-created company replays the typing intro from scratch.
   useEffect(() => {
-    if (welcomeRevealed) return;
-    if (!ceoAgent || !selectedCompany) return;
+    setWelcomeRevealed(false);
+    setChipsRevealed(false);
+  }, [selectedCompanyId]);
 
-    const userHasReplied = (comments ?? []).some(
+  // Start the typing → welcome timer only once we have the ingredients
+  // needed to render the welcome bubble. This guarantees the animation is
+  // visible at the moment the user arrives, even if agent/goal queries
+  // take a beat to resolve.
+  const canRenderWelcome = !!ceoAgent && !!selectedCompany;
+  useEffect(() => {
+    if (!canRenderWelcome) return;
+    if (welcomeRevealed) return;
+    const timeout = setTimeout(() => setWelcomeRevealed(true), 2000);
+    return () => clearTimeout(timeout);
+  }, [canRenderWelcome, welcomeRevealed]);
+
+  // Stage the suggestion chips in shortly after the welcome bubble lands
+  // so the eye reads the message first, then the actions.
+  useEffect(() => {
+    if (!welcomeRevealed) return;
+    if (chipsRevealed) return;
+    const timeout = setTimeout(() => setChipsRevealed(true), 700);
+    return () => clearTimeout(timeout);
+  }, [welcomeRevealed, chipsRevealed]);
+
+  // If the user has already replied in this conversation, fast-forward
+  // past the intro — the welcome isn't a "new" event anymore.
+  useEffect(() => {
+    if (welcomeRevealed && chipsRevealed) return;
+    if (!comments) return;
+    const userHasReplied = comments.some(
       (c) => !c.authorAgentId && c.authorUserId !== "board-concierge",
     );
     if (userHasReplied) {
       setWelcomeRevealed(true);
-      return;
+      setChipsRevealed(true);
     }
-
-    if (welcomeTimerStartRef.current == null) {
-      welcomeTimerStartRef.current = Date.now();
-    }
-    const elapsed = Date.now() - welcomeTimerStartRef.current;
-    const remaining = Math.max(0, WELCOME_TYPING_MS - elapsed);
-    const timeout = setTimeout(() => setWelcomeRevealed(true), remaining);
-    return () => clearTimeout(timeout);
-  }, [welcomeRevealed, ceoAgent, selectedCompany, comments]);
+  }, [comments, welcomeRevealed, chipsRevealed]);
 
   // Clear optimistic message once server-persisted comments include it
   useEffect(() => {
@@ -410,13 +417,15 @@ export function BoardChat() {
     };
   }, []);
 
-  // Elapsed timer for thinking state
+  // Elapsed timer for thinking state — tick at 100ms so the tenths place
+  // updates smoothly and the wait feels quicker than a whole-second counter.
   useEffect(() => {
     if (sending) {
       setElapsedSec(0);
+      const startedAt = Date.now();
       elapsedTimerRef.current = setInterval(() => {
-        setElapsedSec((prev) => prev + 1);
-      }, 1000);
+        setElapsedSec((Date.now() - startedAt) / 1000);
+      }, 100);
     } else {
       if (elapsedTimerRef.current) {
         clearInterval(elapsedTimerRef.current);
@@ -612,7 +621,12 @@ export function BoardChat() {
             className="scrollbar-auto-hide min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden"
           >
             <div className="flex flex-col gap-4 px-4 py-3">
-              {ceoAgent && selectedCompany && (() => {
+              {/* Typing bubble — shown unconditionally until the reveal
+                   timer fires, so the animation is guaranteed to be
+                   visible even while agent/goal data is still loading. */}
+              {!welcomeRevealed && <TypingBubble />}
+
+              {welcomeRevealed && ceoAgent && selectedCompany && (() => {
                 const ceoName = ceoAgent.name;
                 const companyName = selectedCompany.name;
                 const missionLine = missionText
@@ -647,21 +661,17 @@ export function BoardChat() {
 
                 return (
                   <>
-                    {welcomeRevealed ? (
-                      <div className="flex justify-start">
-                        <div
-                          className={cn(
-                            boardChatBubbleShell,
-                            "bg-card border border-border text-foreground [border-radius:14px_14px_14px_4px]",
-                          )}
-                        >
-                          <MarkdownBody className={BOARD_CHAT_MARKDOWN_CLASS}>{welcomeBody}</MarkdownBody>
-                        </div>
+                    <div className="flex justify-start">
+                      <div
+                        className={cn(
+                          boardChatBubbleShell,
+                          "bg-card border border-border text-foreground [border-radius:14px_14px_14px_4px]",
+                        )}
+                      >
+                        <MarkdownBody className={BOARD_CHAT_MARKDOWN_CLASS}>{welcomeBody}</MarkdownBody>
                       </div>
-                    ) : (
-                      <TypingBubble />
-                    )}
-                    {welcomeRevealed && !userHasReplied && (
+                    </div>
+                    {!userHasReplied && chipsRevealed && (
                       <div className="flex flex-wrap gap-2 pl-1">
                         {chips.map((chip) => (
                           <button
@@ -749,7 +759,7 @@ export function BoardChat() {
                   <img src="/paperclip-thinking.svg" alt="" className="inline-block shrink-0" style={{ width: 14, height: 14 }} />
                   <span>{statusText || "Thinking..."}</span>
                   {elapsedSec > 0 && (
-                    <span className="opacity-50">{elapsedSec}s</span>
+                    <span className="opacity-50">{elapsedSec.toFixed(1)}s</span>
                   )}
                 </div>
               )}
@@ -764,10 +774,9 @@ export function BoardChat() {
               type="button"
               onClick={() => scrollToLatest("smooth")}
               aria-label="Jump to latest messages"
-              className="absolute bottom-24 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-foreground shadow-md transition-all duration-150 hover:bg-accent hover:border-muted-foreground/30 hover:-translate-x-1/2 hover:-translate-y-0.5"
+              className="absolute bottom-24 left-1/2 z-10 grid h-8 w-8 -translate-x-1/2 place-items-center rounded-full border border-border bg-card text-foreground shadow-md transition-colors duration-150 hover:bg-accent hover:border-muted-foreground/30"
             >
-              <ArrowDown className="h-3 w-3" />
-              New messages
+              <ArrowDown className="h-4 w-4" />
             </button>
           )}
 

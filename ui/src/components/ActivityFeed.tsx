@@ -593,7 +593,14 @@ export function ActivityFeed({ className }: ActivityFeedProps) {
   return (
     <aside className={cn("flex min-h-0 min-w-0 flex-1 flex-col bg-background", className)}>
       {/* Header */}
-      <div className="flex shrink-0 items-start justify-between gap-2 px-4 py-3 border-b">
+      <div className="relative flex shrink-0 items-start justify-between gap-2 px-4 py-3">
+        {/* Bottom rule: extends through the 12px resize handle on desktop so
+             it visually meets the vertical divider between the chat pane
+             and this feed. On mobile there's no handle, so left-0 is fine. */}
+        <div
+          className="pointer-events-none absolute bottom-0 right-0 left-0 h-px bg-border md:-left-3"
+          aria-hidden
+        />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold">Agent Feed</h3>
           <p className="text-xs text-muted-foreground">
