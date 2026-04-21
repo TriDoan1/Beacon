@@ -1,0 +1,212 @@
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  agents,
+  companies,
+  createDb,
+  heartbeatRuns,
+  issueTreeHoldMembers,
+  issueTreeHolds,
+  issues,
+} from "@paperclipai/db";
+import {
+  getEmbeddedPostgresTestSupport,
+  startEmbeddedPostgresTestDatabase,
+} from "./helpers/embedded-postgres.js";
+import { issueTreeControlService } from "../services/issue-tree-control.js";
+
+const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
+const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
+
+if (!embeddedPostgresSupport.supported) {
+  console.warn(
+    `Skipping embedded Postgres issue tree control service tests on this host: ${embeddedPostgresSupport.reason ?? "unsupported environment"}`,
+  );
+}
+
+describeEmbeddedPostgres("issueTreeControlService", () => {
+  let db!: ReturnType<typeof createDb>;
+  let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
+
+  beforeAll(async () => {
+    tempDb = await startEmbeddedPostgresTestDatabase("paperclip-issue-tree-control-");
+    db = createDb(tempDb.connectionString);
+  }, 20_000);
+
+  afterEach(async () => {
+    await db.delete(issueTreeHoldMembers);
+    await db.delete(issueTreeHolds);
+    await db.delete(issues);
+    await db.delete(heartbeatRuns);
+    await db.delete(agents);
+    await db.delete(companies);
+  });
+
+  afterAll(async () => {
+    await tempDb?.cleanup();
+  });
+
+  it("previews a subtree without changing issue statuses", async () => {
+    const companyId = randomUUID();
+    const otherCompanyId = randomUUID();
+    const agentId = randomUUID();
+    const runId = randomUUID();
+    const rootIssueId = randomUUID();
+    const runningChildId = randomUUID();
+    const doneChildId = randomUUID();
+    const cancelledChildId = randomUUID();
+
+    await db.insert(companies).values([
+      {
+        id: companyId,
+        name: "Paperclip",
+        issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+        requireBoardApprovalForNewAgents: false,
+      },
+      {
+        id: otherCompanyId,
+        name: "OtherCo",
+        issuePrefix: `T${otherCompanyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+        requireBoardApprovalForNewAgents: false,
+      },
+    ]);
+
+    await db.insert(agents).values({
+      id: agentId,
+      companyId,
+      name: "CodexCoder",
+      role: "engineer",
+      status: "running",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    });
+
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId,
+      agentId,
+      invocationSource: "assignment",
+      status: "running",
+      contextSnapshot: { issueId: runningChildId },
+    });
+
+    await db.insert(issues).values([
+      {
+        id: rootIssueId,
+        companyId,
+        title: "Root",
+        status: "todo",
+        priority: "medium",
+        createdAt: new Date("2026-04-21T10:00:00.000Z"),
+      },
+      {
+        id: runningChildId,
+        companyId,
+        parentId: rootIssueId,
+        title: "Running child",
+        status: "in_progress",
+        priority: "medium",
+        assigneeAgentId: agentId,
+        executionRunId: runId,
+        createdAt: new Date("2026-04-21T10:01:00.000Z"),
+      },
+      {
+        id: doneChildId,
+        companyId,
+        parentId: rootIssueId,
+        title: "Done child",
+        status: "done",
+        priority: "medium",
+        createdAt: new Date("2026-04-21T10:02:00.000Z"),
+      },
+      {
+        id: cancelledChildId,
+        companyId,
+        parentId: rootIssueId,
+        title: "Cancelled child",
+        status: "cancelled",
+        priority: "medium",
+        createdAt: new Date("2026-04-21T10:03:00.000Z"),
+      },
+    ]);
+
+    const svc = issueTreeControlService(db);
+    const preview = await svc.preview(companyId, rootIssueId, { mode: "pause" });
+
+    expect(preview.issues.map((issue) => [issue.id, issue.depth, issue.skipped, issue.skipReason])).toEqual([
+      [rootIssueId, 0, false, null],
+      [runningChildId, 1, false, null],
+      [doneChildId, 1, true, "terminal_status"],
+      [cancelledChildId, 1, true, "terminal_status"],
+    ]);
+    expect(preview.totals).toMatchObject({
+      totalIssues: 4,
+      affectedIssues: 2,
+      skippedIssues: 2,
+      activeRuns: 1,
+      queuedRuns: 0,
+      affectedAgents: 1,
+    });
+    expect(preview.countsByStatus).toMatchObject({ todo: 1, in_progress: 1, done: 1, cancelled: 1 });
+    expect(preview.activeRuns).toEqual([
+      expect.objectContaining({ id: runId, issueId: runningChildId, agentId, status: "running" }),
+    ]);
+    expect(preview.warnings.map((warning) => warning.code)).toContain("running_runs_present");
+
+    const [runningChildAfterPreview] = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, runningChildId));
+    expect(runningChildAfterPreview.status).toBe("in_progress");
+
+    await expect(svc.preview(otherCompanyId, rootIssueId, { mode: "pause" })).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it("creates and releases normalized hold snapshots", async () => {
+    const companyId = randomUUID();
+    const rootIssueId = randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      issuePrefix: `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`,
+      requireBoardApprovalForNewAgents: false,
+    });
+    await db.insert(issues).values({
+      id: rootIssueId,
+      companyId,
+      title: "Root",
+      status: "todo",
+      priority: "medium",
+    });
+
+    const svc = issueTreeControlService(db);
+    const created = await svc.createHold(companyId, rootIssueId, {
+      mode: "pause",
+      reason: "operator requested pause",
+      actor: { actorType: "user", actorId: "board-user", userId: "board-user" },
+    });
+
+    expect(created.hold.status).toBe("active");
+    expect(created.hold.members).toHaveLength(1);
+    expect(created.hold.members?.[0]).toMatchObject({
+      issueId: rootIssueId,
+      issueStatus: "todo",
+      skipped: false,
+    });
+
+    const released = await svc.releaseHold(companyId, rootIssueId, created.hold.id, {
+      reason: "operator resumed",
+      actor: { actorType: "user", actorId: "board-user", userId: "board-user" },
+    });
+
+    expect(released.status).toBe("released");
+    expect(released.releaseReason).toBe("operator resumed");
+    expect(released.members).toHaveLength(1);
+  });
+});
