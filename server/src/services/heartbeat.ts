@@ -157,6 +157,7 @@ const EXECUTION_PATH_HEARTBEAT_RUN_STATUSES = ["queued", "running", "scheduled_r
 const CANCELLABLE_HEARTBEAT_RUN_STATUSES = ["queued", "running", "scheduled_retry"] as const;
 const HEARTBEAT_RUN_TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "timed_out"] as const;
 const UNSUCCESSFUL_HEARTBEAT_RUN_TERMINAL_STATUSES = ["failed", "cancelled", "timed_out"] as const;
+const ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_MIN_STALE_MS = 24 * 60 * 60 * 1000;
 export const BOUNDED_TRANSIENT_HEARTBEAT_RETRY_DELAYS_MS = [
   2 * 60 * 1000,
   10 * 60 * 1000,
@@ -4508,7 +4509,7 @@ export function heartbeatService(db: Db) {
   }
 
   async function collectIssueGraphLivenessFindings() {
-    const [issueRows, relationRows, agentRows, activeRunRows, wakeRows] = await Promise.all([
+    const [issueRows, relationRows, agentRows, activeRunRows, activeIssueRunRows, wakeRows] = await Promise.all([
       db
         .select({
           id: issues.id,
@@ -4526,7 +4527,12 @@ export function heartbeatService(db: Db) {
           executionState: issues.executionState,
         })
         .from(issues)
-        .where(isNull(issues.hiddenAt)),
+        .where(
+          and(
+            isNull(issues.hiddenAt),
+            notInArray(issues.originKind, ["harness_liveness_escalation"]),
+          ),
+        ),
       db
         .select({
           companyId: issueRelations.companyId,
@@ -4557,6 +4563,22 @@ export function heartbeatService(db: Db) {
         .where(inArray(heartbeatRuns.status, [...EXECUTION_PATH_HEARTBEAT_RUN_STATUSES])),
       db
         .select({
+          companyId: issues.companyId,
+          agentId: heartbeatRuns.agentId,
+          status: heartbeatRuns.status,
+          issueId: issues.id,
+        })
+        .from(issues)
+        .innerJoin(heartbeatRuns, eq(issues.executionRunId, heartbeatRuns.id))
+        .where(
+          and(
+            isNull(issues.hiddenAt),
+            notInArray(issues.originKind, ["harness_liveness_escalation"]),
+            inArray(heartbeatRuns.status, [...EXECUTION_PATH_HEARTBEAT_RUN_STATUSES]),
+          ),
+        ),
+      db
+        .select({
           companyId: agentWakeupRequests.companyId,
           agentId: agentWakeupRequests.agentId,
           status: agentWakeupRequests.status,
@@ -4575,7 +4597,12 @@ export function heartbeatService(db: Db) {
         agentId: row.agentId,
         status: row.status,
         issueId: issueIdFromRunContext(row.contextSnapshot),
-      })),
+      })).concat(activeIssueRunRows.map((row) => ({
+        companyId: row.companyId,
+        agentId: row.agentId,
+        status: row.status,
+        issueId: row.issueId,
+      }))),
       queuedWakeRequests: wakeRows.map((row) => ({
         companyId: row.companyId,
         agentId: row.agentId,
@@ -4602,6 +4629,67 @@ export function heartbeatService(db: Db) {
       .then((rows) => rows[0] ?? null);
   }
 
+  function parseLivenessIncidentKey(incidentKey: string | null | undefined) {
+    if (!incidentKey) return null;
+    const parts = incidentKey.split(":");
+    if (parts.length !== 5 || parts[0] !== "harness_liveness") return null;
+    const [, companyId, issueId, state, leafIssueId] = parts;
+    if (!companyId || !issueId || !state || !leafIssueId) return null;
+    return { companyId, issueId, state, leafIssueId };
+  }
+
+  function livenessRecoveryLeafIssueId(finding: IssueLivenessFinding) {
+    return finding.recoveryIssueId;
+  }
+
+  function livenessRecoveryLeafFingerprint(finding: IssueLivenessFinding) {
+    return [
+      "harness_liveness_leaf",
+      finding.companyId,
+      finding.state,
+      livenessRecoveryLeafIssueId(finding),
+    ].join(":");
+  }
+
+  function livenessRecoveryLeafKey(companyId: string, state: string, leafIssueId: string) {
+    return ["harness_liveness_leaf", companyId, state, leafIssueId].join(":");
+  }
+
+  async function findOpenLivenessRecoveryIssueForLeaf(finding: IssueLivenessFinding) {
+    const byFingerprint = await db
+      .select()
+      .from(issues)
+      .where(
+        and(
+          eq(issues.companyId, finding.companyId),
+          eq(issues.originKind, "harness_liveness_escalation"),
+          eq(issues.originFingerprint, livenessRecoveryLeafFingerprint(finding)),
+          isNull(issues.hiddenAt),
+          notInArray(issues.status, ["done", "cancelled"]),
+        ),
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    if (byFingerprint) return byFingerprint;
+
+    const leafIssueId = livenessRecoveryLeafIssueId(finding);
+    const openRecoveries = await db
+      .select()
+      .from(issues)
+      .where(
+        and(
+          eq(issues.companyId, finding.companyId),
+          eq(issues.originKind, "harness_liveness_escalation"),
+          isNull(issues.hiddenAt),
+          notInArray(issues.status, ["done", "cancelled"]),
+        ),
+      );
+    return openRecoveries.find((row) => {
+      const parsed = parseLivenessIncidentKey(row.originId);
+      return parsed?.state === finding.state && parsed.leafIssueId === leafIssueId;
+    }) ?? null;
+  }
+
   async function existingBlockerIssueIds(companyId: string, issueId: string) {
     return db
       .select({ blockerIssueId: issueRelations.issueId })
@@ -4614,6 +4702,139 @@ export function heartbeatService(db: Db) {
         ),
       )
       .then((rows) => rows.map((row) => row.blockerIssueId));
+  }
+
+  async function removeRecoveryBlockerFromSource(recovery: typeof issues.$inferSelect) {
+    const parsed = parseLivenessIncidentKey(recovery.originId);
+    if (!parsed) return false;
+    const sourceIssue = await db
+      .select()
+      .from(issues)
+      .where(and(eq(issues.companyId, recovery.companyId), eq(issues.id, parsed.issueId)))
+      .then((rows) => rows[0] ?? null);
+    if (!sourceIssue) return false;
+
+    const blockerIds = await existingBlockerIssueIds(sourceIssue.companyId, sourceIssue.id);
+    if (!blockerIds.includes(recovery.id)) return false;
+    await issuesSvc.update(sourceIssue.id, {
+      blockedByIssueIds: blockerIds.filter((blockerId) => blockerId !== recovery.id),
+    });
+    return true;
+  }
+
+  async function hasActiveRunForIssueId(companyId: string, issueId: string) {
+    const [contextRun, issueRun] = await Promise.all([
+      db
+        .select({ id: heartbeatRuns.id })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            inArray(heartbeatRuns.status, [...EXECUTION_PATH_HEARTBEAT_RUN_STATUSES]),
+            sql`(${heartbeatRuns.contextSnapshot}->>'issueId' = ${issueId}
+              OR ${heartbeatRuns.contextSnapshot}->>'taskId' = ${issueId})`,
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+      db
+        .select({ id: heartbeatRuns.id })
+        .from(issues)
+        .innerJoin(heartbeatRuns, eq(issues.executionRunId, heartbeatRuns.id))
+        .where(
+          and(
+            eq(issues.companyId, companyId),
+            eq(issues.id, issueId),
+            inArray(heartbeatRuns.status, [...EXECUTION_PATH_HEARTBEAT_RUN_STATUSES]),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+    ]);
+    return Boolean(contextRun || issueRun);
+  }
+
+  async function retireObsoleteLivenessRecoveryIssues(findings: IssueLivenessFinding[]) {
+    const currentIncidentKeys = new Set(findings.map((finding) => finding.incidentKey));
+    const currentLeafKeys = new Set(
+      findings.map((finding) =>
+        livenessRecoveryLeafKey(
+          finding.companyId,
+          finding.state,
+          livenessRecoveryLeafIssueId(finding),
+        ),
+      ),
+    );
+    const openRecoveries = await db
+      .select()
+      .from(issues)
+      .where(
+        and(
+          eq(issues.originKind, "harness_liveness_escalation"),
+          isNull(issues.hiddenAt),
+          notInArray(issues.status, ["done", "cancelled"]),
+        ),
+      );
+    const result = {
+      retired: 0,
+      activeSkipped: 0,
+      blockerRelationsRemoved: 0,
+      retiredIssueIds: [] as string[],
+    };
+
+    for (const recovery of openRecoveries) {
+      if (recovery.originId && currentIncidentKeys.has(recovery.originId)) continue;
+      const parsed = parseLivenessIncidentKey(recovery.originId);
+      if (!parsed) continue;
+      if (
+        currentLeafKeys.has(
+          livenessRecoveryLeafKey(parsed.companyId, parsed.state, parsed.leafIssueId),
+        )
+      ) {
+        continue;
+      }
+      if (await removeRecoveryBlockerFromSource(recovery)) {
+        result.blockerRelationsRemoved += 1;
+      }
+      if (await hasActiveRunForIssueId(recovery.companyId, recovery.id)) {
+        result.activeSkipped += 1;
+        continue;
+      }
+      await issuesSvc.update(recovery.id, { status: "cancelled" });
+      result.retired += 1;
+      result.retiredIssueIds.push(recovery.id);
+    }
+
+    return result;
+  }
+
+  async function isLivenessFindingOldEnoughForAutoRecovery(finding: IssueLivenessFinding, now = new Date()) {
+    const issueIds = [...new Set(finding.dependencyPath.map((entry) => entry.issueId))];
+    if (issueIds.length === 0) return false;
+    const rows = await db
+      .select({ id: issues.id, updatedAt: issues.updatedAt })
+      .from(issues)
+      .where(and(eq(issues.companyId, finding.companyId), inArray(issues.id, issueIds)));
+    if (rows.length !== issueIds.length) return false;
+    const latestUpdatedAt = rows.reduce((latest, row) =>
+      row.updatedAt > latest ? row.updatedAt : latest,
+    rows[0]!.updatedAt);
+    return now.getTime() - latestUpdatedAt.getTime() >= ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_MIN_STALE_MS;
+  }
+
+  function isUniqueLivenessRecoveryConflict(error: unknown) {
+    if (!error || typeof error !== "object") return false;
+    const maybe = error as { code?: string; constraint?: string; message?: string };
+    return maybe.code === "23505" &&
+      (
+        maybe.constraint === "issues_active_liveness_recovery_incident_uq" ||
+        maybe.constraint === "issues_active_liveness_recovery_leaf_uq" ||
+        typeof maybe.message === "string" &&
+          (
+            maybe.message.includes("issues_active_liveness_recovery_incident_uq") ||
+            maybe.message.includes("issues_active_liveness_recovery_leaf_uq")
+          )
+      );
   }
 
   function formatDependencyPath(finding: IssueLivenessFinding) {
@@ -4655,20 +4876,53 @@ export function heartbeatService(db: Db) {
     finding: IssueLivenessFinding,
     issue: typeof issues.$inferSelect,
   ) {
-    const candidates = [
-      finding.recommendedOwnerAgentId,
-      ...finding.recommendedOwnerCandidateAgentIds,
-    ].filter((candidate): candidate is string => Boolean(candidate));
+    const detailedCandidates = finding.recommendedOwnerCandidates.length > 0
+      ? finding.recommendedOwnerCandidates
+      : finding.recommendedOwnerCandidateAgentIds.map((agentId) => ({
+        agentId,
+        reason: "ordered_invokable_fallback" as const,
+        sourceIssueId: finding.recoveryIssueId,
+      }));
+    const seenCandidates = new Set<string>();
+    const candidates = detailedCandidates.filter((candidate) => {
+      if (seenCandidates.has(candidate.agentId)) return false;
+      seenCandidates.add(candidate.agentId);
+      return true;
+    });
+    const budgetBlockedCandidateAgentIds: string[] = [];
 
-    for (const candidate of [...new Set(candidates)]) {
-      const budgetBlock = await budgets.getInvocationBlock(issue.companyId, candidate, {
+    for (const candidate of candidates) {
+      const budgetBlock = await budgets.getInvocationBlock(issue.companyId, candidate.agentId, {
         issueId: issue.id,
         projectId: issue.projectId,
       });
-      if (!budgetBlock) return candidate;
+      if (!budgetBlock) {
+        return {
+          agentId: candidate.agentId,
+          reason: candidate.reason,
+          sourceIssueId: candidate.sourceIssueId,
+          candidateAgentIds: candidates.map((entry) => entry.agentId),
+          candidateReasons: candidates.map((entry) => ({
+            agentId: entry.agentId,
+            reason: entry.reason,
+            sourceIssueId: entry.sourceIssueId,
+          })),
+          budgetBlockedCandidateAgentIds,
+        };
+      }
+      budgetBlockedCandidateAgentIds.push(candidate.agentId);
     }
 
     return null;
+  }
+
+  function shouldReuseRecoveryExecutionWorkspace(input: {
+    finding: IssueLivenessFinding;
+    recoveryIssue: typeof issues.$inferSelect;
+    ownerAgentId: string;
+  }) {
+    if (input.finding.recoveryIssueId === input.finding.issueId) return false;
+    return input.recoveryIssue.assigneeAgentId === input.ownerAgentId;
   }
 
   async function ensureIssueBlockedByEscalation(input: {
@@ -4723,7 +4977,16 @@ export function heartbeatService(db: Db) {
       .then((rows) => rows[0] ?? null);
     if (!issue || issue.companyId !== input.finding.companyId) return { kind: "skipped" as const };
 
-    const existing = await findOpenLivenessEscalation(issue.companyId, input.finding.incidentKey);
+    const recoveryIssue = await db
+      .select()
+      .from(issues)
+      .where(and(eq(issues.id, input.finding.recoveryIssueId), eq(issues.companyId, issue.companyId)))
+      .then((rows) => rows[0] ?? null);
+    if (!recoveryIssue) return { kind: "skipped" as const };
+
+    const existing =
+      await findOpenLivenessEscalation(issue.companyId, input.finding.incidentKey) ??
+      await findOpenLivenessRecoveryIssueForLeaf(input.finding);
     if (existing) {
       await ensureIssueBlockedByEscalation({
         issue,
@@ -4734,23 +4997,51 @@ export function heartbeatService(db: Db) {
       return { kind: "existing" as const, escalationIssueId: existing.id };
     }
 
-    const ownerAgentId = await resolveEscalationOwnerAgentId(input.finding, issue);
-    if (!ownerAgentId) return { kind: "skipped" as const };
-
-    const escalation = await issuesSvc.create(issue.companyId, {
-      title: `Unblock liveness incident for ${issue.identifier ?? issue.title}`,
-      description: buildLivenessEscalationDescription(input.finding),
-      status: "todo",
-      priority: "high",
-      parentId: issue.id,
-      projectId: issue.projectId,
-      goalId: issue.goalId,
-      assigneeAgentId: ownerAgentId,
-      originKind: "harness_liveness_escalation",
-      originId: input.finding.incidentKey,
-      billingCode: issue.billingCode,
-      inheritExecutionWorkspaceFromIssueId: issue.id,
+    const ownerSelection = await resolveEscalationOwnerAgentId(input.finding, recoveryIssue);
+    if (!ownerSelection) return { kind: "skipped" as const };
+    const reuseRecoveryExecutionWorkspace = shouldReuseRecoveryExecutionWorkspace({
+      finding: input.finding,
+      recoveryIssue,
+      ownerAgentId: ownerSelection.agentId,
     });
+
+    let escalation: Awaited<ReturnType<typeof issuesSvc.create>>;
+    try {
+      escalation = await issuesSvc.create(issue.companyId, {
+        title: `Unblock liveness incident for ${recoveryIssue.identifier ?? recoveryIssue.title}`,
+        description: buildLivenessEscalationDescription(input.finding),
+        status: "todo",
+        priority: "high",
+        parentId: recoveryIssue.id,
+        projectId: recoveryIssue.projectId,
+        goalId: recoveryIssue.goalId,
+        assigneeAgentId: ownerSelection.agentId,
+        originKind: "harness_liveness_escalation",
+        originId: input.finding.incidentKey,
+        originFingerprint: livenessRecoveryLeafFingerprint(input.finding),
+        billingCode: recoveryIssue.billingCode,
+        ...(reuseRecoveryExecutionWorkspace
+          ? { inheritExecutionWorkspaceFromIssueId: recoveryIssue.id }
+          : {
+            executionWorkspaceId: null,
+            executionWorkspacePreference: null,
+            executionWorkspaceSettings: null,
+          }),
+      });
+    } catch (error) {
+      if (!isUniqueLivenessRecoveryConflict(error)) throw error;
+      const raced =
+        await findOpenLivenessEscalation(issue.companyId, input.finding.incidentKey) ??
+        await findOpenLivenessRecoveryIssueForLeaf(input.finding);
+      if (!raced) throw error;
+      await ensureIssueBlockedByEscalation({
+        issue,
+        escalationIssueId: raced.id,
+        finding: input.finding,
+        runId: input.runId ?? null,
+      });
+      return { kind: "existing" as const, escalationIssueId: raced.id };
+    }
 
     await ensureIssueBlockedByEscalation({
       issue,
@@ -4769,7 +5060,7 @@ export function heartbeatService(db: Db) {
       companyId: issue.companyId,
       actorType: "system",
       actorId: "system",
-      agentId: ownerAgentId,
+      agentId: ownerSelection.agentId,
       runId: input.runId ?? null,
       action: "issue.harness_liveness_escalation_created",
       entityType: "issue",
@@ -4780,19 +5071,35 @@ export function heartbeatService(db: Db) {
         findingState: input.finding.state,
         sourceIssueId: issue.id,
         sourceIdentifier: issue.identifier,
+        recoveryIssueId: recoveryIssue.id,
+        recoveryIdentifier: recoveryIssue.identifier,
         escalationIssueId: escalation.id,
         escalationIdentifier: escalation.identifier,
         dependencyPath: input.finding.dependencyPath,
+        ownerSelection: {
+          selectedAgentId: ownerSelection.agentId,
+          selectedReason: ownerSelection.reason,
+          selectedSourceIssueId: ownerSelection.sourceIssueId,
+          candidateAgentIds: ownerSelection.candidateAgentIds,
+          candidateReasons: ownerSelection.candidateReasons,
+          budgetBlockedCandidateAgentIds: ownerSelection.budgetBlockedCandidateAgentIds,
+        },
+        workspaceSelection: {
+          reuseRecoveryExecutionWorkspace,
+          inheritedExecutionWorkspaceFromIssueId: reuseRecoveryExecutionWorkspace ? recoveryIssue.id : null,
+          projectWorkspaceSourceIssueId: recoveryIssue.id,
+        },
       },
     });
 
-    const wake = await enqueueWakeup(ownerAgentId, {
+    const wake = await enqueueWakeup(ownerSelection.agentId, {
       source: "assignment",
       triggerDetail: "system",
       reason: "issue_assigned",
       payload: {
         issueId: escalation.id,
         sourceIssueId: issue.id,
+        recoveryIssueId: recoveryIssue.id,
         incidentKey: input.finding.incidentKey,
       },
       requestedByActorType: "system",
@@ -4803,6 +5110,7 @@ export function heartbeatService(db: Db) {
         wakeReason: "issue_assigned",
         source: "harness_liveness_escalation",
         sourceIssueId: issue.id,
+        recoveryIssueId: recoveryIssue.id,
         incidentKey: input.finding.incidentKey,
       },
     });
@@ -4811,8 +5119,10 @@ export function heartbeatService(db: Db) {
       incidentKey: input.finding.incidentKey,
       findingState: input.finding.state,
       sourceIssueId: issue.id,
+      recoveryIssueId: recoveryIssue.id,
       escalationIssueId: escalation.id,
-      ownerAgentId,
+      ownerAgentId: ownerSelection.agentId,
+      ownerSelectionReason: ownerSelection.reason,
       wakeupRunId: wake?.id ?? null,
     }, "created issue graph liveness escalation");
 
@@ -4821,16 +5131,37 @@ export function heartbeatService(db: Db) {
 
   async function reconcileIssueGraphLiveness(opts?: { runId?: string | null }) {
     const findings = await collectIssueGraphLivenessFindings();
+    const experimentalSettings = await instanceSettings.getExperimental();
+    const autoRecoveryEnabled = experimentalSettings.enableIssueGraphLivenessAutoRecovery === true;
+    const obsoleteRecoveryCleanup = await retireObsoleteLivenessRecoveryIssues(findings);
     const result = {
       findings: findings.length,
+      autoRecoveryEnabled,
       escalationsCreated: 0,
       existingEscalations: 0,
       skipped: 0,
+      skippedAutoRecoveryDisabled: 0,
+      skippedAutoRecoveryTooYoung: 0,
+      obsoleteRecoveriesRetired: obsoleteRecoveryCleanup.retired,
+      obsoleteRecoveriesActiveSkipped: obsoleteRecoveryCleanup.activeSkipped,
+      obsoleteRecoveryBlockerRelationsRemoved: obsoleteRecoveryCleanup.blockerRelationsRemoved,
       issueIds: [] as string[],
       escalationIssueIds: [] as string[],
+      retiredRecoveryIssueIds: obsoleteRecoveryCleanup.retiredIssueIds,
     };
 
+    if (!autoRecoveryEnabled) {
+      result.skippedAutoRecoveryDisabled = findings.length;
+      return result;
+    }
+
+    const now = new Date();
     for (const finding of findings) {
+      if (!await isLivenessFindingOldEnoughForAutoRecovery(finding, now)) {
+        result.skippedAutoRecoveryTooYoung += 1;
+        result.skipped += 1;
+        continue;
+      }
       const escalation = await createIssueGraphLivenessEscalation({
         finding,
         runId: opts?.runId ?? null,
