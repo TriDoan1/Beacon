@@ -1,9 +1,13 @@
 import type { MouseEvent, ReactNode } from "react";
 import { FileCode2 } from "lucide-react";
+import { useLocation } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import type { ParsedWorkspaceFileRef } from "@/lib/workspace-file-parser";
 import { formatWorkspaceFileRefDisplay } from "@/lib/workspace-file-parser";
-import { useFileViewer } from "@/context/FileViewerContext";
+import {
+  useFileViewer,
+  writeFileViewerStateToSearch,
+} from "@/context/FileViewerContext";
 
 export interface WorkspaceFileLinkProps {
   workspaceFileRef: ParsedWorkspaceFileRef;
@@ -25,6 +29,7 @@ export function WorkspaceFileLink({
   title,
 }: WorkspaceFileLinkProps) {
   const viewer = useFileViewer();
+  const location = useLocation();
   const display = typeof label !== "undefined" ? label : formatWorkspaceFileRefDisplay(workspaceFileRef);
   const canOpen = !!(onOpen || viewer);
   const lineSuffix = workspaceFileRef.line
@@ -37,10 +42,21 @@ export function WorkspaceFileLink({
     ? `Open ${workspaceFileRef.path}${lineSuffix} in the file viewer`
     : `Workspace file ${workspaceFileRef.path}${lineSuffix}`);
 
+  const deepLinkSearch = writeFileViewerStateToSearch(location.search, {
+    path: workspaceFileRef.path,
+    line: workspaceFileRef.line ?? null,
+    column: workspaceFileRef.column ?? null,
+    workspace: "auto",
+  });
+  const href = canOpen
+    ? `${location.pathname}${deepLinkSearch}${location.hash}`
+    : "#";
+
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
       return;
     }
+    if (event.button !== 0) return;
     if (!canOpen) return;
     event.preventDefault();
     if (onOpen) onOpen(workspaceFileRef);
@@ -49,14 +65,14 @@ export function WorkspaceFileLink({
 
   return (
     <a
-      href="#"
+      href={href}
       role={canOpen ? "button" : undefined}
       data-workspace-file-link="true"
       data-workspace-file-path={workspaceFileRef.path}
       aria-label={ariaLabel}
       title={tooltip}
       className={cn(
-        "paperclip-workspace-file-link inline-flex items-center gap-1 rounded-sm border border-border bg-muted/60 px-1.5 py-0.5 font-mono text-[0.78em] leading-tight text-foreground/90 align-baseline no-underline hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+        "paperclip-workspace-file-link inline-flex items-center gap-1 rounded-sm border border-border bg-muted/60 px-1.5 py-0.5 font-mono text-xs leading-tight text-foreground/90 align-baseline no-underline hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
         className,
       )}
       onClick={handleClick}

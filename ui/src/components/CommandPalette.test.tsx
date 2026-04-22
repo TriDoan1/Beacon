@@ -47,6 +47,7 @@ vi.mock("../context/SidebarContext", () => ({
 
 vi.mock("@/lib/router", () => ({
   useNavigate: () => vi.fn(),
+  useLocation: () => ({ pathname: "/", search: "", hash: "" }),
 }));
 
 vi.mock("../api/issues", () => ({

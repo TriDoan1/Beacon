@@ -27,6 +27,7 @@ vi.mock("@/lib/router", () => ({
   }: { children: ReactNode; to: string } & React.ComponentProps<"a">) => (
     <a href={to} {...props}>{children}</a>
   ),
+  useLocation: () => ({ pathname: "/", search: "", hash: "" }),
 }));
 
 vi.mock("../api/issues", () => ({

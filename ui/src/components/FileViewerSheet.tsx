@@ -9,13 +9,14 @@ import {
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  ArrowLeft,
   Ban,
   Check,
+  Cloud,
   Copy,
   FileCode2,
   FileSearch,
   FolderOpen,
+  Link2,
   Loader2,
   Lock,
   RefreshCcw,
@@ -112,7 +113,7 @@ function middleTruncatePath(path: string, maxLen = 80): string {
   return `${head}…${tail}`;
 }
 
-function describeDenial(code: string, fallback: string): { title: string; body: string; icon: ReactNode } {
+export function describeDenial(code: string, fallback: string): { title: string; body: string; icon: ReactNode } {
   const lower = code.toLowerCase();
   if (lower.includes("policy") || lower.includes("denied") || lower.includes("sensitive")) {
     return {
@@ -146,7 +147,7 @@ function describeDenial(code: string, fallback: string): { title: string; body: 
     return {
       icon: <AlertTriangle aria-hidden="true" className="h-6 w-6 text-amber-500" />,
       title: "File is too large to preview",
-      body: fallback || "This file exceeds the supported preview size.",
+      body: "This file exceeds the supported preview size.",
     };
   }
   if (lower.includes("binary") || lower.includes("unsupported")) {
@@ -214,20 +215,15 @@ function OpenFilePrompt({ onSubmit }: OpenFilePromptProps) {
 
   return (
     <form className="space-y-4 p-6" onSubmit={handleSubmit}>
-      <div className="space-y-1">
-        <label htmlFor="paperclip-file-viewer-input" className="text-sm font-medium text-foreground">
-          Open file in this issue
-        </label>
-        <p className="text-xs text-muted-foreground">
-          Type a workspace-relative path, for example <code className="font-mono text-[0.78em]">ui/src/pages/IssueDetail.tsx:42</code>.
-        </p>
-      </div>
+      <label htmlFor="paperclip-file-viewer-input" className="sr-only">
+        Workspace-relative file path
+      </label>
       <input
         ref={inputRef}
         id="paperclip-file-viewer-input"
         type="text"
         className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        placeholder="path/to/file.ext or path/to/file.ext:42"
+        placeholder="e.g. ui/src/pages/IssueDetail.tsx:42"
         value={value}
         onChange={(event) => setValue(event.target.value)}
         autoComplete="off"
@@ -340,7 +336,7 @@ function FileContentViewer({ content, highlightedLine, onLoaded }: FileContentVi
       tabIndex={0}
       className="paperclip-file-viewer-code flex-1 overflow-auto bg-[var(--paperclip-code-bg,theme(colors.muted.DEFAULT))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
-      <pre className="m-0 font-mono text-[12.5px] leading-5">
+      <pre className="m-0 font-mono text-xs leading-5">
         {lines.map((lineText, index) => {
           const lineNumber = index + 1;
           const isHighlighted = lineNumber === highlightedLine;
@@ -350,21 +346,17 @@ function FileContentViewer({ content, highlightedLine, onLoaded }: FileContentVi
               ref={isHighlighted ? highlightedLineRef : undefined}
               data-line-number={lineNumber}
               className={cn(
-                "relative flex whitespace-pre",
+                "flex whitespace-pre",
                 isHighlighted && "bg-[var(--paperclip-code-highlight-bg,rgba(250,204,21,0.12))]",
               )}
             >
-              {isHighlighted ? (
-                <span
-                  aria-hidden="true"
-                  className="absolute left-0 top-0 bottom-0 w-0.5 bg-[var(--paperclip-code-highlight-border,rgb(234,179,8))]"
-                />
-              ) : null}
               <span
                 aria-hidden="true"
                 className={cn(
-                  "shrink-0 select-none px-3 text-right text-[var(--paperclip-code-gutter-fg,theme(colors.muted.foreground))] opacity-70",
-                  isHighlighted && "opacity-100",
+                  "sticky left-0 z-10 shrink-0 select-none px-3 text-right text-[var(--paperclip-code-gutter-fg,theme(colors.muted.foreground))] opacity-70",
+                  "bg-[var(--paperclip-code-bg,theme(colors.muted.DEFAULT))]",
+                  isHighlighted &&
+                    "opacity-100 bg-[var(--paperclip-code-highlight-bg,rgba(250,204,21,0.12))] border-l-2 border-[var(--paperclip-code-highlight-border,rgb(234,179,8))]",
                 )}
                 style={{ width: gutterWidth }}
               >
@@ -531,6 +523,7 @@ export function FileViewerSheet({
   const description = state
     ? middleTruncatePath(state.path)
     : "Enter a workspace-relative path to preview.";
+  const showDescription = state ? description !== title : true;
 
   return (
     <Sheet open={computedOpen} onOpenChange={handleOpenChange}>
@@ -550,7 +543,10 @@ export function FileViewerSheet({
               </SheetTitle>
               <SheetDescription
                 id={FILE_VIEWER_DESCRIBED_BY_ID}
-                className="truncate font-mono text-[11px]"
+                className={cn(
+                  "truncate font-mono text-xs",
+                  !showDescription && "sr-only",
+                )}
                 title={state?.path}
               >
                 {description}
@@ -580,7 +576,7 @@ export function FileViewerSheet({
                   title="Copy link"
                   className="h-7 w-7"
                 >
-                  {copiedField === "link" ? <Check className="h-4 w-4 text-green-500" /> : <FileSearch className="h-4 w-4" />}
+                  {copiedField === "link" ? <Check className="h-4 w-4 text-green-500" /> : <Link2 className="h-4 w-4" />}
                 </Button>
               ) : null}
               <Button
@@ -596,25 +592,25 @@ export function FileViewerSheet({
             </div>
           </div>
           {resolvedResource ? (
-            <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
               <span
-                className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5"
+                className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5"
                 title={resolvedResource.workspaceLabel}
               >
                 From {resolvedResource.workspaceLabel}
               </span>
               {resolvedResource.previewKind ? (
-                <span className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 capitalize">
+                <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 capitalize">
                   {resolvedResource.previewKind}
                 </span>
               ) : null}
               {formatBytes(resolvedResource.byteSize) ? (
-                <span className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5">
+                <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5">
                   {formatBytes(resolvedResource.byteSize)}
                 </span>
               ) : null}
               {state?.line ? (
-                <span className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5">
+                <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5">
                   Line {state.line}
                   {state.column ? `, Col ${state.column}` : ""}
                 </span>
@@ -688,11 +684,7 @@ function FileViewerBody({
         <FileViewerStateView
           icon={<FileSearch aria-hidden="true" className="h-6 w-6 text-muted-foreground" />}
           title="File not found"
-          body={
-            onFallbackToProject
-              ? "That file was not found in the active workspace."
-              : "That file was not found in this workspace."
-          }
+          body="That file was not found in the active workspace."
           actions={
             <>
               {onFallbackToProject ? (
@@ -738,7 +730,7 @@ function FileViewerBody({
   if (resource.kind === "remote_resource") {
     return (
       <FileViewerStateView
-        icon={<ArrowLeft aria-hidden="true" className="h-6 w-6 text-muted-foreground" />}
+        icon={<Cloud aria-hidden="true" className="h-6 w-6 text-muted-foreground" />}
         title="Remote workspace preview coming soon"
         body="This workspace is hosted remotely; inline previews are not supported yet."
       />
@@ -746,7 +738,7 @@ function FileViewerBody({
   }
 
   if (!canPreview) {
-    const denial = describeDenial(resource.denialReason ?? "", resource.denialReason ?? "");
+    const denial = describeDenial(resource.denialReason ?? "", "");
     return <FileViewerStateView icon={denial.icon} title={denial.title} body={denial.body} />;
   }
 
