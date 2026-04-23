@@ -1316,93 +1316,96 @@ function AgentOverview({
 
   return (
     <div className="space-y-8">
-      {/* Hero: two-zone — left "what's happening now" (75%) | right budget (25%) */}
-      <div className="grid grid-cols-1 lg:grid-cols-[3fr_1fr] gap-4">
-        {/* Left zone — current work + recent-run feed */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className={cn("inline-block h-2 w-2 rounded-full shrink-0", statusDotClass)} />
-            <span className={cn("text-sm font-medium", statusTextClass)}>{statusLabel}</span>
-          </div>
-          {latestRun ? (
-            <LatestRunCard run={latestRun} agentId={agentRouteId} />
-          ) : (
-            <div className="border border-border rounded-none p-4 text-sm text-muted-foreground">
-              No runs yet.
-            </div>
-          )}
-          {priorRuns.length > 0 && (
-            <div className="border border-border rounded-none">
-              {priorRuns.map((run, idx) => {
-                const tone = runStatusIcons[run.status] ?? { icon: Clock, color: "text-neutral-400" };
-                const Icon = tone.icon;
-                return (
-                  <Link
-                    key={run.id}
-                    to={`/agents/${agentRouteId}/runs/${run.id}`}
-                    className={cn(
-                      "flex items-center gap-2 px-3 py-1.5 text-xs no-underline hover:bg-muted/50 transition-colors",
-                      idx > 0 && "border-t border-border",
-                    )}
-                  >
-                    <Icon className={cn("h-3 w-3 shrink-0", tone.color, run.status === "running" && "animate-spin")} />
-                    <span className="font-mono text-muted-foreground">{run.id.slice(0, 8)}</span>
-                    <span>{run.status.replace(/_/g, " ")}</span>
-                    <span className="ml-auto text-muted-foreground tabular-nums">{relativeTime(run.createdAt)}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-          {showIdleHint && (
-            topInFlight ? (
-              <Link
-                to={`/issues/${topInFlight.identifier ?? topInFlight.id}`}
-                className="block text-xs text-muted-foreground hover:text-foreground transition-colors no-underline truncate"
-              >
-                Next up · <span className="font-mono">{topInFlight.identifier ?? topInFlight.id.slice(0, 8)}</span>{" "}
-                {topInFlight.title} &rarr;
-              </Link>
-            ) : (
-              <p className="text-xs text-muted-foreground">No pending work</p>
-            )
-          )}
+      {/* Hero: activity pill (agent-level) above a 75/25 grid */}
+      <div className="space-y-3">
+        {/* Activity pill — spans the hero, describes the agent */}
+        <div className="flex items-center gap-2">
+          <span className={cn("inline-block h-2 w-2 rounded-full shrink-0", statusDotClass)} />
+          <span className={cn("text-sm font-medium", statusTextClass)}>{statusLabel}</span>
         </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[3fr_1fr] gap-4">
+          {/* Left zone — current work + recent-run feed */}
+          <div className="space-y-3">
+            {latestRun ? (
+              <LatestRunCard run={latestRun} agentId={agentRouteId} />
+            ) : (
+              <div className="border border-border rounded-none p-4 text-sm text-muted-foreground">
+                No runs yet.
+              </div>
+            )}
+            {priorRuns.length > 0 && (
+              <div className="border border-border rounded-none">
+                {priorRuns.map((run, idx) => {
+                  const tone = runStatusIcons[run.status] ?? { icon: Clock, color: "text-neutral-400" };
+                  const Icon = tone.icon;
+                  return (
+                    <Link
+                      key={run.id}
+                      to={`/agents/${agentRouteId}/runs/${run.id}`}
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 text-xs no-underline hover:bg-muted/50 transition-colors",
+                        idx > 0 && "border-t border-border",
+                      )}
+                    >
+                      <Icon className={cn("h-3 w-3 shrink-0", tone.color, run.status === "running" && "animate-spin")} />
+                      <span className="font-mono text-muted-foreground">{run.id.slice(0, 8)}</span>
+                      <span>{run.status.replace(/_/g, " ")}</span>
+                      <span className="ml-auto text-muted-foreground tabular-nums">{relativeTime(run.createdAt)}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+            {showIdleHint && (
+              topInFlight ? (
+                <Link
+                  to={`/issues/${topInFlight.identifier ?? topInFlight.id}`}
+                  className="block text-xs text-muted-foreground hover:text-foreground transition-colors no-underline truncate"
+                >
+                  Next up · <span className="font-mono">{topInFlight.identifier ?? topInFlight.id.slice(0, 8)}</span>{" "}
+                  {topInFlight.title} &rarr;
+                </Link>
+              ) : (
+                <p className="text-xs text-muted-foreground">No pending work</p>
+              )
+            )}
+          </div>
 
-        {/* Right zone — budget position */}
-        <div>
-          {budgetSummary && budgetSummary.amount > 0 ? (
-            <div className="border border-border rounded-none p-4 space-y-2">
-              <div className="text-xs text-muted-foreground">Budget — this month</div>
-              <div className="flex items-baseline justify-between gap-2 tabular-nums">
-                <span className="text-sm font-semibold">
-                  {formatCents(budgetSummary.observedAmount)} of {formatCents(budgetSummary.amount)}
-                </span>
-                <span className="text-xs text-muted-foreground shrink-0">{budgetSummary.utilizationPercent}%</span>
+          {/* Right zone — budget position */}
+          <div>
+            {budgetSummary && budgetSummary.amount > 0 ? (
+              <div className="border border-border rounded-none p-4 space-y-2">
+                <div className="text-xs text-muted-foreground">Budget — this month</div>
+                <div className="flex items-baseline justify-between gap-2 tabular-nums">
+                  <span className="text-sm font-semibold">
+                    {formatCents(budgetSummary.observedAmount)} of {formatCents(budgetSummary.amount)}
+                  </span>
+                  <span className="text-xs text-muted-foreground shrink-0">{budgetSummary.utilizationPercent}%</span>
+                </div>
+                <div className="h-2 bg-muted overflow-hidden rounded-full">
+                  <div
+                    className={cn(
+                      "h-full transition-[width] duration-200",
+                      budgetSummary.status === "hard_stop"
+                        ? "bg-red-400"
+                        : budgetSummary.status === "warning"
+                          ? "bg-amber-300"
+                          : "bg-emerald-300",
+                    )}
+                    style={{ width: `${Math.min(100, budgetSummary.utilizationPercent)}%` }}
+                  />
+                </div>
+                <div className="text-xs text-muted-foreground tabular-nums">
+                  {formatCents(budgetSummary.remainingAmount)} remaining
+                  {budgetResetLabel && <span> · {budgetResetLabel}</span>}
+                </div>
               </div>
-              <div className="h-2 bg-muted overflow-hidden rounded-full">
-                <div
-                  className={cn(
-                    "h-full transition-[width] duration-200",
-                    budgetSummary.status === "hard_stop"
-                      ? "bg-red-400"
-                      : budgetSummary.status === "warning"
-                        ? "bg-amber-300"
-                        : "bg-emerald-300",
-                  )}
-                  style={{ width: `${Math.min(100, budgetSummary.utilizationPercent)}%` }}
-                />
+            ) : (
+              <div className="border border-border rounded-none p-4 text-sm text-muted-foreground">
+                No budget configured.
               </div>
-              <div className="text-xs text-muted-foreground tabular-nums">
-                {formatCents(budgetSummary.remainingAmount)} remaining
-                {budgetResetLabel && <span> · {budgetResetLabel}</span>}
-              </div>
-            </div>
-          ) : (
-            <div className="border border-border rounded-none p-4 text-sm text-muted-foreground">
-              No budget configured.
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 

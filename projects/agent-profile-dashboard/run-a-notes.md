@@ -139,3 +139,55 @@ Concept-level revision, not a layout tweak. The Phase 3a icon strip (§7 of the 
 ### Concept doc updated
 
 Added a "Phase 3a revision" note at the end of `run-a-concept.md` recording this drift from §7. The original §7 is preserved as authored; the revision supersedes it for implementation.
+
+---
+
+## Phase 3a polish round 3 — hero-spanning activity pill
+
+Mode 2 alignment exploration resolved in favor of Option C (hero-spanning header). Three approaches were proposed inline; Option C picked for its semantic honesty, preserved cyan isolation, and zero-cost structural shift.
+
+### Decision
+
+The activity pill was lifted out of the left zone and promoted to a hero-spanning position above the 75/25 grid. Latest Run card and budget card now share a vertical baseline; no grid-level asymmetry at the tops.
+
+### User's reasoning (approved option)
+
+- **Semantic honesty.** The activity pill describes the *agent* overall, not the current-work column. Promoting it one level up reflects its actual scope.
+- **Von Restorff preserved.** The cyan signal keeps its spatial isolation — important for rubric Section 6 "Live-run signal strength." Options B (absorb into card) and the three-running-signals-in-one-container problem would have compromised this.
+- **Lowest structural cost.** Zero new elements, zero new tokens. The pill changes position, nothing else changes.
+- **Sharpened Latest Run meaning.** The card now unambiguously reads as "a specific run," not "what the agent is doing." Cleaner conceptual separation between agent-level and run-level state.
+- **Graceful zero-runs.** No conditional complexity — the pill lives in the hero header regardless of whether there are any runs; the left zone's fallback "No runs yet" card sits cleanly in its slot.
+
+**Why not Option A (symmetric eyebrows):** introduced a new informational signal (budget state indicator) to solve a layout problem — symptom-treating rather than root-cause.
+
+**Why not Option B (pill into card):** three "running" signals inside one card (pill row + StatusBadge + cyan Loader2) reads as noise; loses spatial Von Restorff.
+
+### Pill-grounding treatment (my call)
+
+The risk flagged in the proposal was the pill looking "lonely" alone above a wide 1440px grid. Chose tight-proximity grounding rather than a visible separator:
+
+- Hero wrapper uses `space-y-3` (12px), matching the existing intra-zone rhythm. The pill sits 12px above the grid — same gap as pill-to-card was in the prior layout.
+- **No border-b** below the pill. A horizontal rule would read as "section divider," which is heavier than the pill deserves — the pill is a small element, not a section head. Proximity alone groups it with the grid below.
+- **No decorative elevation** (no subtle bg, no padding container). The pill keeps its minimal dot + text treatment from earlier phases. *Aesthetic-Usability Effect*: restraint here.
+
+**Principle cited:** Gestalt — *Proximity* over *Uniform Connectedness*. 12px between pill and grid is short enough that the eye groups them as one unit without needing a visual connector.
+
+### Structural change
+
+- `AgentOverview` hero block now wraps in an outer `space-y-3` container.
+- First child: activity pill (flex row — dot + label).
+- Second child: the existing `grid grid-cols-1 lg:grid-cols-[3fr_1fr]` with left and right zones. Left zone's internal `space-y-3` unchanged — now it starts directly with the Latest Run card (no pill).
+- The outer `space-y-8` that separates the hero from the chart band below is preserved on the parent `AgentOverview` div.
+
+### 1440px no-scroll
+
+Expected delta was +4–8px. Confirmed negligible in practice: hero gains ~20px at the top (pill moved up) but left zone shrinks by ~20px (pill removed from its stack). Net increase is just the space-y-3 gap between the pill and the grid vs. the pill-to-card gap when it lived inside the left zone — zero to within rounding.
+
+### DS compliance
+
+Neutral. No new tokens, no new components, no new raw-palette classes. The change is pure DOM restructuring of existing elements.
+
+### Residual items for Phase 3b onwards
+
+- Right zone is now visually sparse (budget card only, ~140px tall). The chart band in Phase 3b may naturally fill space below the right zone; not a current-phase concern.
+- If the smoke test finds the pill still looks lonely despite proximity grounding, a minimal alternative is to swap `space-y-3` to `space-y-2` (tighter) — one-line change. No escalation to borders or backgrounds unless that fails first.
