@@ -2363,7 +2363,7 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
       {composerAttachments.length > 0 ? (
         <div
           data-testid="issue-chat-composer-attachments"
-          className="mt-2 space-y-1.5 rounded-md border border-dashed border-border/80 bg-muted/20 p-2"
+          className="mb-3 mt-2 space-y-1.5 rounded-md border border-dashed border-border/80 bg-muted/20 p-2"
         >
           {composerAttachments.map((attachment) => {
             const sizeLabel = formatAttachmentSize(attachment.size);

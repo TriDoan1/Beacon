@@ -428,6 +428,31 @@ describe("MarkdownEditor", () => {
     });
   });
 
+  it("does not show the raw fallback while image-only markdown is settling", async () => {
+    mdxEditorMockState.emitMountSilentEmptyState = true;
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <MarkdownEditor
+          value="![Screenshot](/api/attachments/image/content)"
+          onChange={() => {}}
+          placeholder="Markdown body"
+        />,
+      );
+    });
+
+    await flush();
+    await flush();
+
+    expect(container.querySelector("textarea")).toBeNull();
+    expect(container.textContent).not.toContain("Rich editor unavailable for this markdown");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("anchors the mention menu inside the visual viewport when mobile offsets are present", () => {
     expect(
       computeMentionMenuPosition(
