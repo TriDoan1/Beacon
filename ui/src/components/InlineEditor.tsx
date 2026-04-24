@@ -277,7 +277,7 @@ export function InlineEditor({
           aria-label={placeholder}
         >
           <MarkdownBody className={cn("paperclip-edit-in-place-content", className)}>
-            {value}
+            {previewValue}
           </MarkdownBody>
         </div>
       );
