@@ -91,15 +91,32 @@ vi.mock("./IssueRow", () => ({
     issue,
     desktopMetaLeading,
     desktopTrailing,
+    titleClassName,
+    checklistStepNumber,
+    checklistCurrentStep,
+    checklistDependencyChips,
+    checklistRowId,
   }: {
     issue: Issue;
     desktopMetaLeading?: ReactNode;
     desktopTrailing?: ReactNode;
+    titleClassName?: string;
+    checklistStepNumber?: number | null;
+    checklistCurrentStep?: boolean;
+    checklistDependencyChips?: ReactNode;
+    checklistRowId?: string;
   }) => (
-    <div data-testid="issue-row">
+    <div
+      data-testid="issue-row"
+      id={checklistRowId}
+      data-step={checklistStepNumber ?? undefined}
+      data-current-step={checklistCurrentStep ? "true" : undefined}
+      data-title-class={titleClassName ?? undefined}
+    >
       <span>{issue.title}</span>
       {desktopMetaLeading}
       {desktopTrailing}
+      {checklistDependencyChips}
     </div>
   ),
 }));
@@ -421,6 +438,57 @@ describe("IssuesList", () => {
       expect(container.textContent).toContain("Next up");
       const link = container.querySelector('a[href="/issues/PAP-2"]');
       expect(link?.textContent).toContain("Implement next slice");
+    });
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("adds checklist affordances for workflow-sorted sub-issue lists", async () => {
+    const issueDone = createIssue({
+      id: "issue-done",
+      identifier: "PAP-1",
+      title: "Done first",
+      status: "done",
+      createdAt: new Date("2026-04-01T00:00:00.000Z"),
+    });
+    const issueBlocked = createIssue({
+      id: "issue-blocked",
+      identifier: "PAP-2",
+      title: "Blocked issue",
+      status: "blocked",
+      blockedBy: [{ id: "issue-active", identifier: "PAP-3", title: "Active blocker", status: "todo", priority: "medium", assigneeAgentId: null, assigneeUserId: null }],
+      createdAt: new Date("2026-04-02T00:00:00.000Z"),
+    });
+    const issueActive = createIssue({
+      id: "issue-active",
+      identifier: "PAP-3",
+      title: "Active blocker",
+      status: "todo",
+      createdAt: new Date("2026-04-03T00:00:00.000Z"),
+    });
+
+    const { root } = renderWithQueryClient(
+      <IssuesList
+        issues={[issueBlocked, issueActive, issueDone]}
+        agents={[]}
+        projects={[]}
+        viewStateKey="paperclip:test-issues"
+        defaultSortField="workflow"
+        onUpdateIssue={() => undefined}
+      />,
+      container,
+    );
+
+    await waitForAssertion(() => {
+      const rows = Array.from(container.querySelectorAll('[data-testid="issue-row"]'));
+      expect(rows).toHaveLength(3);
+      expect(rows.map((row) => row.getAttribute("data-step"))).toEqual(["1", "2", "3"]);
+      expect(rows.filter((row) => row.getAttribute("data-current-step") === "true")).toHaveLength(1);
+      expect(rows.find((row) => row.textContent?.includes("Active blocker"))?.getAttribute("data-current-step")).toBe("true");
+      expect(rows.find((row) => row.textContent?.includes("Done first"))?.getAttribute("data-title-class")).toContain("text-muted-foreground");
+      expect(container.textContent).toContain("blocked by PAP-3");
     });
 
     act(() => {

@@ -23,6 +23,11 @@ interface IssueRowProps {
   desktopTrailing?: ReactNode;
   trailingMeta?: ReactNode;
   titleSuffix?: ReactNode;
+  titleClassName?: string;
+  checklistStepNumber?: number | null;
+  checklistCurrentStep?: boolean;
+  checklistDependencyChips?: ReactNode;
+  checklistRowId?: string;
   unreadState?: UnreadState | null;
   onMarkRead?: () => void;
   onArchive?: () => void;
@@ -41,6 +46,11 @@ export function IssueRow({
   desktopTrailing,
   trailingMeta,
   titleSuffix,
+  titleClassName,
+  checklistStepNumber = null,
+  checklistCurrentStep = false,
+  checklistDependencyChips,
+  checklistRowId,
   unreadState = null,
   onMarkRead,
   onArchive,
@@ -53,6 +63,7 @@ export function IssueRow({
   const showUnreadDot = unreadState === "visible" || unreadState === "fading";
   const selectedStatusClass = selected ? "!text-muted-foreground !border-muted-foreground" : undefined;
   const detailState = withIssueDetailHeaderSeed(issueLinkState, issue);
+  const hasChecklistStep = checklistStepNumber !== null;
 
   return (
     <Link
@@ -61,20 +72,36 @@ export function IssueRow({
       disableIssueQuicklook
       issuePrefetch={issue}
       data-inbox-issue-link
+      id={checklistRowId}
+      aria-current={checklistCurrentStep ? "step" : undefined}
       onClickCapture={() => rememberIssueDetailLocationState(issuePathId, detailState)}
       className={cn(
         "group flex items-start gap-2 border-b border-border py-2.5 pl-2 pr-3 text-sm no-underline text-inherit transition-colors last:border-b-0 sm:items-center sm:py-2 sm:pl-1",
         selected ? "hover:bg-transparent" : "hover:bg-accent/50",
+        checklistCurrentStep ? "border-l-2 border-l-primary/40 pl-[calc(theme(spacing.2)-2px)] sm:pl-[calc(theme(spacing.1)-2px)]" : null,
         className,
       )}
     >
+      {hasChecklistStep ? (
+        <span
+          className="hidden w-8 shrink-0 self-center text-right font-mono text-xs text-muted-foreground sm:inline-block"
+          aria-hidden="true"
+        >
+          {checklistStepNumber}.
+        </span>
+      ) : null}
       <span className="shrink-0 pt-px sm:hidden">
         {mobileLeading ?? <StatusIcon status={issue.status} blockerAttention={issue.blockerAttention} className={selectedStatusClass} />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1 sm:contents">
-        <span className="line-clamp-2 text-sm sm:order-2 sm:min-w-0 sm:flex-1 sm:truncate sm:line-clamp-none">
+        <span className={cn("line-clamp-2 text-sm sm:order-2 sm:min-w-0 sm:flex-1 sm:truncate sm:line-clamp-none", titleClassName)}>
           {issue.title}{titleSuffix}
         </span>
+        {checklistDependencyChips ? (
+          <span className="flex flex-wrap gap-1 sm:order-3 sm:ml-[calc(theme(spacing.3)+theme(spacing.2))]">
+            {checklistDependencyChips}
+          </span>
+        ) : null}
         <span className="flex items-center gap-2 sm:order-1 sm:shrink-0">
           {desktopLeadingSpacer ? (
             <span className="hidden w-3.5 shrink-0 sm:block" />

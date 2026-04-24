@@ -236,6 +236,10 @@ function issueMatchesLocalSearch(issue: Issue, normalizedSearch: string): boolea
   ].some((value) => value?.toLowerCase().includes(normalizedSearch));
 }
 
+function isActionableWorkflowStatus(status: IssueStatus): boolean {
+  return status !== "done" && status !== "cancelled" && status !== "blocked";
+}
+
 /* ── Component ── */
 
 interface Agent {
@@ -820,6 +824,42 @@ export function IssuesList({
       : null,
     [issues, showProgressSummary],
   );
+  const checklistAffordanceEnabled = useMemo(
+    () =>
+      defaultSortField === "workflow"
+      && viewState.sortField === "workflow"
+      && viewState.groupBy === "none",
+    [defaultSortField, viewState.groupBy, viewState.sortField],
+  );
+  const workflowChecklistMeta = useMemo(() => {
+    if (!checklistAffordanceEnabled) return null;
+
+    const visibleIssueIds = new Set(filtered.map((issue) => issue.id));
+    const stepNumberByIssueId = new Map<string, number>();
+    const unresolvedVisibleBlockersByIssueId = new Map<string, string[]>();
+
+    filtered.forEach((issue, index) => {
+      stepNumberByIssueId.set(issue.id, index + 1);
+      const unresolvedVisible = (issue.blockedBy ?? [])
+        .map((blocker) => blocker.id)
+        .filter((blockerId) => {
+          if (!visibleIssueIds.has(blockerId)) return false;
+          const blockerIssue = issueById.get(blockerId);
+          if (!blockerIssue) return false;
+          return blockerIssue.status !== "done" && blockerIssue.status !== "cancelled";
+        });
+      unresolvedVisibleBlockersByIssueId.set(issue.id, unresolvedVisible);
+    });
+
+    const firstActionable = filtered.find((issue) => isActionableWorkflowStatus(issue.status)) ?? null;
+    const currentStepIssue = firstActionable ?? filtered.find((issue) => issue.status === "blocked") ?? null;
+
+    return {
+      stepNumberByIssueId,
+      unresolvedVisibleBlockersByIssueId,
+      currentStepIssueId: currentStepIssue?.id ?? null,
+    };
+  }, [checklistAffordanceEnabled, filtered, issueById]);
 
   const { data: labels } = useQuery({
     queryKey: queryKeys.issues.labels(selectedCompanyId!),
@@ -1237,6 +1277,41 @@ export function IssuesList({
                         : viewState.collapsedParents.filter((id) => id !== issue.id),
                     });
                   };
+                  const checklistMeta = workflowChecklistMeta;
+                  const checklistStepNumber = checklistMeta?.stepNumberByIssueId.get(issue.id) ?? null;
+                  const unresolvedVisibleBlockers = checklistMeta?.unresolvedVisibleBlockersByIssueId.get(issue.id) ?? [];
+                  const checklistRowId = checklistMeta ? `issue-workflow-row-${issue.id}` : undefined;
+                  const doneRowTitleClass = checklistMeta && issue.status === "done"
+                    ? "text-muted-foreground"
+                    : undefined;
+                  const checklistDependencyChips = checklistMeta && unresolvedVisibleBlockers.length > 0 ? (
+                    <>
+                      {unresolvedVisibleBlockers.map((blockerId) => {
+                        const blockerIssue = issueById.get(blockerId);
+                        if (!blockerIssue) return null;
+                        const label = blockerIssue.identifier ?? blockerIssue.id.slice(0, 8);
+                        return (
+                          <button
+                            key={blockerId}
+                            type="button"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              const target = document.getElementById(`issue-workflow-row-${blockerId}`);
+                              if (!target) return;
+                              target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                              target.focus?.();
+                            }}
+                            className="inline-flex items-center rounded-full border border-amber-400/45 bg-amber-50/60 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 hover:bg-amber-100/80 dark:border-amber-300/35 dark:bg-amber-400/10 dark:text-amber-300"
+                            title={`Blocked by ${label}`}
+                            aria-label={`Blocked by ${label}`}
+                          >
+                            blocked by {label}
+                          </button>
+                        );
+                      })}
+                    </>
+                  ) : null;
 
                   return (
                     <div
@@ -1254,6 +1329,11 @@ export function IssuesList({
                       <IssueRow
                         issue={issue}
                         issueLinkState={issueLinkState}
+                        checklistStepNumber={checklistStepNumber}
+                        checklistCurrentStep={checklistMeta?.currentStepIssueId === issue.id}
+                        checklistDependencyChips={checklistDependencyChips}
+                        checklistRowId={checklistRowId}
+                        titleClassName={doneRowTitleClass}
                         titleSuffix={(
                           <>
                             {hasChildren && !isExpanded ? (
