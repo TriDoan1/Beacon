@@ -62,7 +62,7 @@ const coveredBlockedMatrix: CoveredBlockedCell[] = [
       attentionBlockerCount: 0,
       sampleBlockerIdentifier: "PAP-2175",
     },
-    expectedVisual: "dashed red ring",
+    expectedVisual: "cyan ring",
     expectedCopy: "Blocked · waiting on active sub-issue PAP-2175",
   },
   {
@@ -76,7 +76,7 @@ const coveredBlockedMatrix: CoveredBlockedCell[] = [
       attentionBlockerCount: 0,
       sampleBlockerIdentifier: null,
     },
-    expectedVisual: "dashed red ring",
+    expectedVisual: "cyan ring",
     expectedCopy: "Blocked · waiting on 3 active sub-issues",
   },
   {
@@ -90,7 +90,7 @@ const coveredBlockedMatrix: CoveredBlockedCell[] = [
       attentionBlockerCount: 0,
       sampleBlockerIdentifier: "PAP-1918",
     },
-    expectedVisual: "dashed red ring",
+    expectedVisual: "cyan ring",
     expectedCopy: "Blocked · covered by active dependency PAP-1918",
   },
   {
@@ -104,7 +104,7 @@ const coveredBlockedMatrix: CoveredBlockedCell[] = [
       attentionBlockerCount: 0,
       sampleBlockerIdentifier: null,
     },
-    expectedVisual: "dashed red ring",
+    expectedVisual: "cyan ring",
     expectedCopy: "Blocked · covered by 2 active dependencies",
   },
   {

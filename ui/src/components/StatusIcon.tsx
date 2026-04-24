@@ -51,7 +51,9 @@ function blockedAttentionLabel(blockerAttention: IssueBlockerAttention | null | 
 export function StatusIcon({ status, blockerAttention, onChange, className, showLabel }: StatusIconProps) {
   const [open, setOpen] = useState(false);
   const isCoveredBlocked = status === "blocked" && blockerAttention?.state === "covered";
-  const colorClass = issueStatusIcon[status] ?? issueStatusIconDefault;
+  const colorClass = isCoveredBlocked
+    ? "text-cyan-600 border-cyan-600 dark:text-cyan-400 dark:border-cyan-400"
+    : issueStatusIcon[status] ?? issueStatusIconDefault;
   const isDone = status === "done";
   const ariaLabel = status === "blocked" ? blockedAttentionLabel(blockerAttention) : statusLabel(status);
 
@@ -60,7 +62,6 @@ export function StatusIcon({ status, blockerAttention, onChange, className, show
       className={cn(
         "relative inline-flex h-4 w-4 rounded-full border-2 shrink-0",
         colorClass,
-        isCoveredBlocked && "border-dashed",
         onChange && !showLabel && "cursor-pointer",
         className
       )}
@@ -70,6 +71,9 @@ export function StatusIcon({ status, blockerAttention, onChange, className, show
     >
       {isDone && (
         <span className="absolute inset-0 m-auto h-2 w-2 rounded-full bg-current" />
+      )}
+      {isCoveredBlocked && (
+        <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-background bg-current" />
       )}
     </span>
   );

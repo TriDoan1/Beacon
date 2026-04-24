@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { StatusIcon } from "./StatusIcon";
 
 describe("StatusIcon", () => {
-  it("renders covered blocked issues with a dashed red attention state label", () => {
+  it("renders covered blocked issues with the cyan covered state visual", () => {
     const html = renderToStaticMarkup(
       <StatusIcon
         status="blocked"
@@ -23,10 +23,10 @@ describe("StatusIcon", () => {
     expect(html).toContain('data-blocker-attention-state="covered"');
     expect(html).toContain('aria-label="Blocked · waiting on active sub-issue PAP-2"');
     expect(html).toContain('title="Blocked · waiting on active sub-issue PAP-2"');
-    expect(html).toContain("border-red-600");
-    expect(html).toContain("border-dashed");
-    expect(html).not.toContain("border-cyan-600");
-    expect(html).not.toContain("-bottom-0.5");
+    expect(html).toContain("border-cyan-600");
+    expect(html).not.toContain("border-red-600");
+    expect(html).not.toContain("border-dashed");
+    expect(html).toContain("-bottom-0.5");
   });
 
   it("uses covered blocked copy for the active dependency count matrix", () => {
@@ -45,7 +45,8 @@ describe("StatusIcon", () => {
     );
 
     expect(html).toContain('aria-label="Blocked · covered by 2 active dependencies"');
-    expect(html).toContain("border-dashed");
+    expect(html).toContain("border-cyan-600");
+    expect(html).not.toContain("border-dashed");
   });
 
   it("keeps normal blocked issues on the attention-required visual", () => {
