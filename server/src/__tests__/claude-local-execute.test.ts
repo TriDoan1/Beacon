@@ -711,7 +711,7 @@ describe("claude execute", () => {
       expect(result.exitCode).toBe(1);
       expect(result.errorCode).toBe("claude_transient_upstream");
       expect(result.errorFamily).toBe("transient_upstream");
-      const expectedRetryNotBefore = new Date(2026, 3, 22, 16, 0, 0, 0).toISOString();
+      const expectedRetryNotBefore = "2026-04-22T21:00:00.000Z";
       expect(result.retryNotBefore).toBe(expectedRetryNotBefore);
       expect(result.resultJson?.retryNotBefore).toBe(expectedRetryNotBefore);
       expect(result.errorMessage ?? "").toContain("extra usage");
