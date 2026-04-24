@@ -128,6 +128,10 @@ function hasMeaningfulEditorContent(node: Node | null): boolean {
   return Array.from(element.childNodes).some((child) => hasMeaningfulEditorContent(child));
 }
 
+function hasMarkdownImage(value: string): boolean {
+  return /!\[[\s\S]*?\]\([^)]+\)/.test(value);
+}
+
 function isRichEditorDomEmpty(
   editable: HTMLElement,
   expectedValue: string,
@@ -135,9 +139,11 @@ function isRichEditorDomEmpty(
 ): boolean {
   const expectedText = expectedValue.trim();
   if (!expectedText) return false;
+  const expectedHasImage = hasMarkdownImage(expectedText);
 
   const visibleText = (editable.textContent ?? "").trim();
   if (visibleText.length === 0) {
+    if (expectedHasImage) return false;
     return !Array.from(editable.childNodes).some((child) => hasMeaningfulEditorContent(child));
   }
 
@@ -147,6 +153,7 @@ function isRichEditorDomEmpty(
     && visibleText === normalizedPlaceholder
     && expectedText !== normalizedPlaceholder
   ) {
+    if (expectedHasImage) return false;
     return true;
   }
 
