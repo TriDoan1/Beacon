@@ -229,7 +229,9 @@ vi.mock("../components/ScrollToBottom", () => ({
 }));
 
 vi.mock("../components/StatusIcon", () => ({
-  StatusIcon: ({ status }: { status: string }) => <span>{status}</span>,
+  StatusIcon: ({ status, blockerAttention }: { status: string; blockerAttention?: Issue["blockerAttention"] }) => (
+    <span data-status-icon-state={blockerAttention?.state}>{status}</span>
+  ),
 }));
 
 vi.mock("../components/PriorityIcon", () => ({
@@ -812,6 +814,31 @@ describe("IssueDetail", () => {
     expect(container.textContent).toContain("Issue detail smoke");
     expect(container.textContent).toContain("Chat thread");
     expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it("passes blocker attention to the issue detail header status icon", async () => {
+    mockIssuesApi.get.mockResolvedValue(createIssue({
+      status: "blocked",
+      blockerAttention: {
+        state: "covered",
+        reason: "active_child",
+        unresolvedBlockerCount: 1,
+        coveredBlockerCount: 1,
+        attentionBlockerCount: 0,
+        sampleBlockerIdentifier: "PAP-2",
+      },
+    }));
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+
+    expect(container.querySelector('[data-status-icon-state="covered"]')?.textContent).toBe("blocked");
   });
 
   it("refreshes subtree pause state after resuming a hold", async () => {
