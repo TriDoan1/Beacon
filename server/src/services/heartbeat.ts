@@ -113,6 +113,7 @@ import {
   findExistingRunLivenessContinuationWake,
   readContinuationAttempt,
 } from "./recovery/index.js";
+import { isAutomaticRecoverySuppressedByPauseHold } from "./recovery/pause-hold-guard.js";
 import { recoveryService } from "./recovery/service.js";
 import { redactCurrentUserText, redactCurrentUserValue } from "../log-redaction.js";
 import {
@@ -5875,6 +5876,10 @@ export function heartbeatService(db: Db) {
         .limit(1)
         .then((rows) => rows[0] ?? null);
       if (existingExecutionPath) {
+        return { kind: "released" as const };
+      }
+
+      if (await isAutomaticRecoverySuppressedByPauseHold(db, issue.companyId, issue.id)) {
         return { kind: "released" as const };
       }
 

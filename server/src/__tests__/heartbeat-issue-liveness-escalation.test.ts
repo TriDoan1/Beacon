@@ -10,6 +10,7 @@ import {
   heartbeatRuns,
   issueComments,
   issueRelations,
+  issueTreeHolds,
   issues,
   projects,
   projectWorkspaces,
@@ -221,6 +222,33 @@ describeEmbeddedPostgres("heartbeat issue graph liveness escalation", () => {
     expect(result.findings).toBe(1);
     expect(result.escalationsCreated).toBe(0);
     expect(result.skippedAutoRecoveryTooYoung).toBe(1);
+
+    const escalations = await db
+      .select()
+      .from(issues)
+      .where(and(eq(issues.companyId, companyId), eq(issues.originKind, "harness_liveness_escalation")));
+    expect(escalations).toHaveLength(0);
+  });
+
+  it("suppresses liveness escalation when the source issue is under an active pause hold", async () => {
+    await enableAutoRecovery();
+    const { companyId, blockedIssueId } = await seedBlockedChain();
+
+    await db.insert(issueTreeHolds).values({
+      companyId,
+      rootIssueId: blockedIssueId,
+      mode: "pause",
+      status: "active",
+      reason: "pause liveness recovery subtree",
+      releasePolicy: { strategy: "manual" },
+    });
+
+    const result = await heartbeatService(db).reconcileIssueGraphLiveness();
+
+    expect(result.findings).toBe(1);
+    expect(result.escalationsCreated).toBe(0);
+    expect(result.existingEscalations).toBe(0);
+    expect(result.skipped).toBe(1);
 
     const escalations = await db
       .select()
