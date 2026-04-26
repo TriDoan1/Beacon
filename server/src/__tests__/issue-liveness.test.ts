@@ -286,6 +286,38 @@ describe("issue graph liveness classifier", () => {
     });
   });
 
+  it("skips paused stalled review assignees when choosing recovery owner candidates", () => {
+    const reviewIssueId = "review-1";
+
+    const findings = classifyIssueGraphLiveness({
+      issues: [
+        issue({
+          id: reviewIssueId,
+          identifier: "PAP-2279",
+          title: "Screenshot acceptance review",
+          status: "in_review",
+          assigneeAgentId: coderId,
+          executionState: null,
+        }),
+      ],
+      relations: [],
+      agents: [agent({ status: "paused" }), manager],
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      state: "in_review_without_action_path",
+      recommendedOwnerAgentId: managerId,
+    });
+    expect(findings[0]?.recommendedOwnerCandidates).toEqual([
+      {
+        agentId: managerId,
+        reason: "assignee_reporting_chain",
+        sourceIssueId: reviewIssueId,
+      },
+    ]);
+  });
+
   it("does not flag healthy in_review issues with an explicit action path", () => {
     const reviewIssueId = "review-1";
     const baseReviewIssue = issue({
