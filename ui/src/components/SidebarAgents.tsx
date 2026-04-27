@@ -61,7 +61,14 @@ function SidebarAgentItem({
   const editHref = `${agentUrl(agent)}/configuration`;
   const isActive = activeAgentId === routeRef;
   const isPaused = agent.status === "paused";
+  const isBudgetPaused = isPaused && agent.pauseReason === "budget";
   const pauseResumeLabel = isPaused ? "Resume agent" : "Pause agent";
+  const pauseResumeDisabled = disabled || agent.status === "pending_approval" || isBudgetPaused;
+  const pauseResumeDisabledLabel = disabled
+    ? "Updating..."
+    : isBudgetPaused
+      ? "Budget paused"
+      : pauseResumeLabel;
 
   return (
     <div className="group/agent relative flex items-center">
@@ -130,11 +137,15 @@ function SidebarAgentItem({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            onClick={() => onPauseResume(agent, isPaused ? "resume" : "pause")}
-            disabled={disabled || agent.status === "pending_approval"}
+            onClick={() => {
+              if (pauseResumeDisabled) return;
+              onPauseResume(agent, isPaused ? "resume" : "pause");
+            }}
+            disabled={pauseResumeDisabled}
+            title={isBudgetPaused ? "Agent was paused by budget limits" : undefined}
           >
             {isPaused ? <PlayCircle className="size-4" /> : <PauseCircle className="size-4" />}
-            <span>{disabled ? "Updating..." : pauseResumeLabel}</span>
+            <span>{pauseResumeDisabledLabel}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -144,6 +155,7 @@ function SidebarAgentItem({
 
 export function SidebarAgents() {
   const [open, setOpen] = useState(true);
+  const [pendingAgentIds, setPendingAgentIds] = useState<Set<string>>(() => new Set());
   const queryClient = useQueryClient();
   const { selectedCompanyId } = useCompany();
   const { openNewAgent } = useDialog();
@@ -198,6 +210,13 @@ export function SidebarAgents() {
       action === "pause"
         ? agentsApi.pause(agent.id, selectedCompanyId ?? undefined)
         : agentsApi.resume(agent.id, selectedCompanyId ?? undefined),
+    onMutate: ({ agent }) => {
+      setPendingAgentIds((current) => {
+        const next = new Set(current);
+        next.add(agent.id);
+        return next;
+      });
+    },
     onSuccess: async (_agent, { agent, action }) => {
       if (selectedCompanyId) {
         await Promise.all([
@@ -221,6 +240,13 @@ export function SidebarAgents() {
         title: action === "pause" ? "Could not pause agent" : "Could not resume agent",
         body: error instanceof Error ? error.message : agent.name,
         tone: "error",
+      });
+    },
+    onSettled: (_data, _error, { agent }) => {
+      setPendingAgentIds((current) => {
+        const next = new Set(current);
+        next.delete(agent.id);
+        return next;
       });
     },
   });
@@ -263,7 +289,7 @@ export function SidebarAgents() {
                 activeAgentId={activeAgentId}
                 activeTab={activeTab}
                 agent={agent}
-                disabled={pauseResumeAgent.isPending}
+                disabled={pendingAgentIds.has(agent.id)}
                 isMobile={isMobile}
                 onPauseResume={(targetAgent, action) => pauseResumeAgent.mutate({ agent: targetAgent, action })}
                 runCount={runCount}

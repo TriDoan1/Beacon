@@ -238,4 +238,76 @@ describe("SidebarAgents", () => {
     expect(mockAgentsApi.resume).toHaveBeenCalledWith("agent-1", "company-1");
     expect(mockPushToast).toHaveBeenCalledWith(expect.objectContaining({ title: "Agent resumed" }));
   });
+
+  it("only shows updating state for the agent currently being changed", async () => {
+    mockAgentsApi.list.mockResolvedValue([
+      makeAgent({ id: "agent-1", name: "Alpha", urlKey: "alpha" }),
+      makeAgent({ id: "agent-2", name: "Beta", urlKey: "beta" }),
+    ]);
+    mockAgentsApi.pause.mockImplementation(() => new Promise(() => {}));
+    const currentRoot = createRoot(container);
+    root = currentRoot;
+
+    await act(async () => {
+      currentRoot.render(
+        <QueryClientProvider client={queryClient}>
+          <SidebarAgents />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+    await openAgentMenu();
+
+    const pauseItem = Array.from(document.body.querySelectorAll('[data-slot="dropdown-menu-item"]'))
+      .find((element) => element.textContent?.includes("Pause agent"));
+    expect(pauseItem).toBeTruthy();
+
+    await act(async () => {
+      pauseItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
+    await openAgentMenu("Open actions for Beta");
+
+    const betaPauseItem = Array.from(
+      document.body.querySelectorAll('[data-slot="dropdown-menu-item"]'),
+    )
+      .find((element) => element.textContent?.includes("Pause agent"));
+    expect(betaPauseItem).toBeTruthy();
+    expect(document.body.textContent).not.toContain("Updating...");
+  });
+
+  it("does not offer sidebar resume for budget-paused agents", async () => {
+    mockAgentsApi.list.mockResolvedValue([
+      makeAgent({
+        status: "paused",
+        pauseReason: "budget",
+        pausedAt: new Date("2026-01-02T00:00:00Z"),
+      }),
+    ]);
+    const currentRoot = createRoot(container);
+    root = currentRoot;
+
+    await act(async () => {
+      currentRoot.render(
+        <QueryClientProvider client={queryClient}>
+          <SidebarAgents />
+        </QueryClientProvider>,
+      );
+    });
+    await flushReact();
+    await openAgentMenu();
+
+    const budgetPausedItem = Array.from(
+      document.body.querySelectorAll('[data-slot="dropdown-menu-item"]'),
+    )
+      .find((element) => element.textContent?.includes("Budget paused"));
+    expect(budgetPausedItem).toBeTruthy();
+
+    await act(async () => {
+      budgetPausedItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
+
+    expect(mockAgentsApi.resume).not.toHaveBeenCalled();
+  });
 });
