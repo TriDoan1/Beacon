@@ -49,10 +49,10 @@ export function ProductivityReviewBadge({
             "inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300 shrink-0 hover:bg-amber-500/20 transition-colors",
             className,
           )}
-          aria-label={`Productivity review ${reviewIdentifier} (${label})`}
+          aria-label={`Under review · productivity review ${reviewIdentifier} (${label})`}
         >
           <Eye className="h-3 w-3" aria-hidden />
-          {hideLabel ? null : <span>Productivity review</span>}
+          {hideLabel ? null : <span>Under review</span>}
         </Link>
       </TooltipTrigger>
       <TooltipContent>
