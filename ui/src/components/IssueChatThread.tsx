@@ -27,6 +27,7 @@ import {
   type ReactNode,
 } from "react";
 import { Link, useLocation } from "@/lib/router";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type {
   Agent,
   FeedbackDataSharingPreference,
@@ -2097,6 +2098,106 @@ function issueChatMessageQueuedRunIsInterrupting(
   return Boolean(queueTargetRunId && interruptingQueuedRunId === queueTargetRunId);
 }
 
+// Above ~150 merged rows the direct render path forces React to mount and
+// re-render hundreds of Markdown bodies, feedback controls, and avatars on
+// unrelated parent updates. Above this threshold we switch to a windowed
+// render path so only visible rows plus overscan stay mounted.
+export const VIRTUALIZED_THREAD_ROW_THRESHOLD = 150;
+const VIRTUALIZED_THREAD_OVERSCAN = 6;
+// Rough "average row" estimate. The virtualizer measures real heights as
+// rows mount, so this only affects offscreen rows it has not seen yet.
+const VIRTUALIZED_THREAD_ROW_ESTIMATE_PX = 220;
+const VIRTUALIZED_THREAD_GAP_FULL_PX = 16;
+const VIRTUALIZED_THREAD_GAP_EMBEDDED_PX = 12;
+
+interface VirtualizedIssueChatThreadListProps {
+  messages: readonly ThreadMessage[];
+  feedbackVoteByTargetId: ReadonlyMap<string, FeedbackVoteValue>;
+  activeRunIds: ReadonlySet<string>;
+  stoppingRunId?: string | null;
+  interruptingQueuedRunId?: string | null;
+  variant: "full" | "embedded";
+}
+
+function VirtualizedIssueChatThreadList({
+  messages,
+  feedbackVoteByTargetId,
+  activeRunIds,
+  stoppingRunId,
+  interruptingQueuedRunId,
+  variant,
+}: VirtualizedIssueChatThreadListProps) {
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useLayoutEffect(() => {
+    const element = parentRef.current;
+    if (!element || typeof window === "undefined") return;
+    const update = () => {
+      const offset = element.getBoundingClientRect().top + window.scrollY;
+      setScrollMargin((previous) => (Math.abs(previous - offset) < 0.5 ? previous : offset));
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  const gap = variant === "embedded"
+    ? VIRTUALIZED_THREAD_GAP_EMBEDDED_PX
+    : VIRTUALIZED_THREAD_GAP_FULL_PX;
+
+  const virtualizer = useWindowVirtualizer({
+    count: messages.length,
+    estimateSize: () => VIRTUALIZED_THREAD_ROW_ESTIMATE_PX,
+    overscan: VIRTUALIZED_THREAD_OVERSCAN,
+    scrollMargin,
+    gap,
+    getItemKey: (index) => messages[index]?.id ?? index,
+  });
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+
+  return (
+    <div
+      ref={parentRef}
+      data-testid="issue-chat-thread-virtualizer"
+      data-virtual-count={messages.length}
+      style={{ position: "relative", width: "100%", height: totalSize }}
+    >
+      {virtualItems.map((virtualItem) => {
+        const message = messages[virtualItem.index];
+        if (!message) return null;
+        return (
+          <div
+            key={virtualItem.key}
+            data-index={virtualItem.index}
+            data-testid="issue-chat-thread-virtual-row"
+            ref={virtualizer.measureElement}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              transform: `translateY(${virtualItem.start - scrollMargin}px)`,
+            }}
+          >
+            <IssueChatMessageRow
+              message={message}
+              feedbackVoteByTargetId={feedbackVoteByTargetId}
+              activeRunIds={activeRunIds}
+              stoppingRunId={stoppingRunId}
+              interruptingQueuedRunId={interruptingQueuedRunId}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 interface IssueChatMessageRowProps {
   message: ThreadMessage;
   feedbackVoteByTargetId: ReadonlyMap<string, FeedbackVoteValue>;
@@ -2933,6 +3034,15 @@ export function IssueChatThread({
                 )}>
                   {resolvedEmptyMessage}
                 </div>
+              ) : messages.length >= VIRTUALIZED_THREAD_ROW_THRESHOLD ? (
+                <VirtualizedIssueChatThreadList
+                  messages={messages}
+                  feedbackVoteByTargetId={feedbackVoteByTargetId}
+                  activeRunIds={activeRunIds}
+                  stoppingRunId={stoppingRunId}
+                  interruptingQueuedRunId={interruptingQueuedRunId}
+                  variant={variant}
+                />
               ) : (
                 // Keep transcript rendering independent from assistant-ui's
                 // index-scoped message providers; live transcripts can shrink

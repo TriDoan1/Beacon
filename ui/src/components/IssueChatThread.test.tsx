@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "@paperclipai/shared";
 import {
   IssueChatThread,
+  VIRTUALIZED_THREAD_ROW_THRESHOLD,
   canStopIssueChatRun,
   resolveAssistantMessageFoldedState,
   resolveIssueChatHumanAuthor,
@@ -330,7 +331,94 @@ describe("IssueChatThread", () => {
     });
   });
 
-  it("mounts one measurable row per merged long-thread message", () => {
+  it("virtualizes long merged threads so only a windowed slice mounts", () => {
+    const root = createRoot(container);
+    const totalMergedRows =
+      issueChatLongThreadComments.length
+      + issueChatLongThreadEvents.length
+      + issueChatLongThreadLinkedRuns.length;
+    expect(totalMergedRows).toBeGreaterThanOrEqual(VIRTUALIZED_THREAD_ROW_THRESHOLD);
+
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <IssueChatThread
+            comments={issueChatLongThreadComments}
+            linkedRuns={issueChatLongThreadLinkedRuns}
+            timelineEvents={issueChatLongThreadEvents}
+            liveRuns={[]}
+            agentMap={issueChatLongThreadAgentMap}
+            currentUserId="user-board"
+            onAdd={async () => {}}
+            showComposer={false}
+            showJumpToLatest={false}
+            enableLiveTranscriptPolling={false}
+            transcriptsByRunId={issueChatLongThreadTranscriptsByRunId}
+            hasOutputForRun={(runId) => issueChatLongThreadTranscriptsByRunId.has(runId)}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    const virtualizer = container.querySelector(
+      '[data-testid="issue-chat-thread-virtualizer"]',
+    ) as HTMLDivElement | null;
+    expect(virtualizer).not.toBeNull();
+    expect(virtualizer?.dataset.virtualCount).toBe(String(totalMergedRows));
+
+    const rows = container.querySelectorAll('[data-testid="issue-chat-message-row"]');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.length).toBeLessThan(totalMergedRows);
+
+    const virtualRows = container.querySelectorAll(
+      '[data-testid="issue-chat-thread-virtual-row"]',
+    );
+    expect(virtualRows.length).toBe(rows.length);
+    for (const row of Array.from(virtualRows)) {
+      const transform = (row as HTMLDivElement).style.transform;
+      expect(transform).toMatch(/translateY\(/);
+    }
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("keeps the direct render path for short threads under the virtualization threshold", () => {
+    const root = createRoot(container);
+    const directComments = issueChatLongThreadComments.slice(0, 12);
+
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <IssueChatThread
+            comments={directComments}
+            linkedRuns={[]}
+            timelineEvents={[]}
+            liveRuns={[]}
+            agentMap={issueChatLongThreadAgentMap}
+            currentUserId="user-board"
+            onAdd={async () => {}}
+            showComposer={false}
+            showJumpToLatest={false}
+            enableLiveTranscriptPolling={false}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(
+      container.querySelector('[data-testid="issue-chat-thread-virtualizer"]'),
+    ).toBeNull();
+    const rows = container.querySelectorAll('[data-testid="issue-chat-message-row"]');
+    expect(rows.length).toBe(directComments.length);
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("renders virtualized rows with the same role/kind metadata as the direct path", () => {
     const root = createRoot(container);
 
     act(() => {
@@ -355,8 +443,18 @@ describe("IssueChatThread", () => {
     });
 
     const rows = container.querySelectorAll('[data-testid="issue-chat-message-row"]');
-    expect(rows.length).toBeGreaterThanOrEqual(450);
-    expect(container.querySelectorAll('[data-message-role="assistant"]').length).toBeGreaterThanOrEqual(150);
+    expect(rows.length).toBeGreaterThan(0);
+    const roles = new Set<string>();
+    const kinds = new Set<string>();
+    for (const row of Array.from(rows)) {
+      const element = row as HTMLDivElement;
+      const role = element.dataset.messageRole;
+      const kind = element.dataset.messageKind;
+      if (role) roles.add(role);
+      if (kind) kinds.add(kind);
+    }
+    expect(roles.size).toBeGreaterThan(0);
+    expect(kinds.size).toBeGreaterThan(0);
 
     act(() => {
       root.unmount();
