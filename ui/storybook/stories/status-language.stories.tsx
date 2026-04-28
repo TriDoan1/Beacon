@@ -473,9 +473,11 @@ function ProductivityReviewMatrix() {
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        The amber pill links from the source issue header to the open productivity-review child. List rows
-        get a smaller eye glyph next to the status icon so operators can spot yellow tasks without the
-        clickable label. The review issue itself shows the same amber pill in static (non-link) form.
+        On the source issue header the amber pill reads <strong>Under review</strong> and links to the open
+        productivity-review child — describing the state the task is in. The productivity-review issue itself
+        carries a static <strong>Productivity review</strong> pill identifying what kind of issue it is.
+        List rows get a smaller eye glyph next to the status icon so operators can spot yellow tasks without
+        the clickable label.
       </p>
     </div>
   );
