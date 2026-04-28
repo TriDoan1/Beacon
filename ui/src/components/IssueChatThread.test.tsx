@@ -13,6 +13,8 @@ import {
   resolveAssistantMessageFoldedState,
   resolveIssueChatHumanAuthor,
 } from "./IssueChatThread";
+import { ToastProvider } from "../context/ToastContext";
+import { ToastViewport } from "./ToastViewport";
 import type {
   AskUserQuestionsInteraction,
   RequestConfirmationInteraction,
@@ -1611,6 +1613,127 @@ describe("IssueChatThread", () => {
         },
       }),
     );
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("warns once before sending a reply with no assignee selected", async () => {
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <ToastProvider>
+          <ToastViewport />
+          <MemoryRouter>
+            <IssueChatThread
+              comments={[]}
+              linkedRuns={[]}
+              timelineEvents={[]}
+              liveRuns={[]}
+              onAdd={async () => {}}
+              enableReassign
+              reassignOptions={[
+                { id: "", label: "No assignee" },
+                { id: "agent:agent-1", label: "Agent 1" },
+              ]}
+              currentAssigneeValue=""
+              suggestedAssigneeValue=""
+              enableLiveTranscriptPolling={false}
+            />
+          </MemoryRouter>
+        </ToastProvider>,
+      );
+    });
+
+    const editor = container.querySelector('textarea[aria-label="Issue chat editor"]') as HTMLTextAreaElement | null;
+    const submitButton = Array.from(container.querySelectorAll("button")).find(
+      (element) => element.textContent === "Send",
+    ) as HTMLButtonElement | undefined;
+    expect(editor).not.toBeNull();
+    expect(submitButton).toBeDefined();
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(editor, "Reply without assignee");
+      editor?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      submitButton?.click();
+    });
+
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("No assignee selected");
+
+    await act(async () => {
+      submitButton?.click();
+    });
+
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    expect(appendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [{ type: "text", text: "Reply without assignee" }],
+      }),
+    );
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("does not warn when sending a reply with an assignee selected", async () => {
+    const root = createRoot(container);
+
+    act(() => {
+      root.render(
+        <ToastProvider>
+          <ToastViewport />
+          <MemoryRouter>
+            <IssueChatThread
+              comments={[]}
+              linkedRuns={[]}
+              timelineEvents={[]}
+              liveRuns={[]}
+              onAdd={async () => {}}
+              enableReassign
+              reassignOptions={[
+                { id: "", label: "No assignee" },
+                { id: "agent:agent-1", label: "Agent 1" },
+              ]}
+              currentAssigneeValue="agent:agent-1"
+              suggestedAssigneeValue="agent:agent-1"
+              enableLiveTranscriptPolling={false}
+            />
+          </MemoryRouter>
+        </ToastProvider>,
+      );
+    });
+
+    const editor = container.querySelector('textarea[aria-label="Issue chat editor"]') as HTMLTextAreaElement | null;
+    const submitButton = Array.from(container.querySelectorAll("button")).find(
+      (element) => element.textContent === "Send",
+    ) as HTMLButtonElement | undefined;
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      valueSetter?.call(editor, "Reply with assignee");
+      editor?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      submitButton?.click();
+    });
+
+    expect(appendMock).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain("No assignee selected");
 
     act(() => {
       root.unmount();

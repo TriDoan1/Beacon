@@ -90,6 +90,7 @@ import {
   shouldPreserveComposerViewport,
 } from "../lib/issue-chat-scroll";
 import { formatAssigneeUserLabel } from "../lib/assignees";
+import { useOptionalToastActions } from "../context/ToastContext";
 import type { CompanyUserProfile } from "../lib/company-members";
 import { timeAgo } from "../lib/timeAgo";
 import {
@@ -544,6 +545,10 @@ function parseReassignment(target: string): PaperclipIssueRuntimeReassignment | 
 function shouldImplicitlyReopenComment(issueStatus: string | undefined, assigneeValue: string) {
   const resumesToTodo = issueStatus === "done" || issueStatus === "cancelled" || issueStatus === "blocked";
   return resumesToTodo && assigneeValue.startsWith("agent:");
+}
+
+function isUnassignedReassignValue(value: string): boolean {
+  return !value || value === "__none__";
 }
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -2375,6 +2380,7 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
   issueStatus,
 }, forwardedRef) {
   const api = useAui();
+  const toastActions = useOptionalToastActions();
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [attaching, setAttaching] = useState(false);
@@ -2383,6 +2389,7 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
   const dragDepthRef = useRef(0);
   const effectiveSuggestedAssigneeValue = suggestedAssigneeValue ?? currentAssigneeValue;
   const [reassignTarget, setReassignTarget] = useState(effectiveSuggestedAssigneeValue);
+  const [unassignedConfirmed, setUnassignedConfirmed] = useState(false);
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const editorRef = useRef<MarkdownEditorRef>(null);
   const composerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -2429,6 +2436,10 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
     setReassignTarget(effectiveSuggestedAssigneeValue);
   }, [effectiveSuggestedAssigneeValue]);
 
+  useEffect(() => {
+    setUnassignedConfirmed(false);
+  }, [reassignTarget]);
+
   useImperativeHandle(forwardedRef, () => ({
     focus: focusComposer,
     restoreDraft: (submittedBody: string) => {
@@ -2446,6 +2457,22 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
     const trimmed = body.trim();
     if (!trimmed || submitting) return;
 
+    const composerHasAssigneePicker = enableReassign && reassignOptions.length > 0;
+    if (
+      composerHasAssigneePicker
+      && isUnassignedReassignValue(reassignTarget)
+      && !unassignedConfirmed
+    ) {
+      toastActions?.pushToast({
+        title: "No assignee selected",
+        body: "Pick an assignee or click Send again to post without one.",
+        tone: "warn",
+        dedupeKey: `issue-chat-no-assignee:${draftKey ?? ""}`,
+      });
+      setUnassignedConfirmed(true);
+      return;
+    }
+
     const hasReassignment = enableReassign && reassignTarget !== currentAssigneeValue;
     const reassignment = hasReassignment ? parseReassignment(reassignTarget) : undefined;
     const reopen = shouldImplicitlyReopenComment(
@@ -2457,6 +2484,7 @@ const IssueChatComposer = forwardRef<IssueChatComposerHandle, IssueChatComposerP
 
     setSubmitting(true);
     setBody("");
+    setUnassignedConfirmed(false);
     try {
       const appendPromise = api.thread().append({
         role: "user",
