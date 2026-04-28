@@ -908,6 +908,57 @@ describe("IssuesList", () => {
     });
   });
 
+  it("waits for the desktop main scroll container before rendering more local rows", async () => {
+    const manyIssues = Array.from({ length: 420 }, (_, index) =>
+      createIssue({
+        id: `issue-${index + 1}`,
+        identifier: `PAP-${index + 1}`,
+        title: `Issue ${index + 1}`,
+      }),
+    );
+    const main = document.createElement("main");
+    main.id = "main-content";
+    main.style.overflowY = "auto";
+    document.body.appendChild(main);
+    main.appendChild(container);
+    Object.defineProperty(main, "clientHeight", { configurable: true, value: 600 });
+    Object.defineProperty(main, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(main, "scrollTop", { configurable: true, writable: true, value: 0 });
+    setDocumentScrollMetrics({ innerHeight: 600, scrollY: 0, scrollHeight: 600 });
+
+    const { root } = renderWithQueryClient(
+      <IssuesList
+        issues={manyIssues}
+        agents={[]}
+        projects={[]}
+        viewStateKey="paperclip:test-issues"
+        onUpdateIssue={() => undefined}
+      />,
+      container,
+    );
+
+    await waitForAssertion(() => {
+      expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(100);
+    });
+
+    await flush();
+    await flush();
+    expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(100);
+
+    act(() => {
+      main.scrollTop = 1500;
+      main.dispatchEvent(new Event("scroll"));
+    });
+
+    await waitForAssertion(() => {
+      expect(container.querySelectorAll('[data-testid="issue-row"]').length).toBeGreaterThan(100);
+    });
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("requests more server issues after scrolling past the rendered rows", async () => {
     const visibleIssues = Array.from({ length: 100 }, (_, index) =>
       createIssue({

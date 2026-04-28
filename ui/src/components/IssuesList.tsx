@@ -73,6 +73,22 @@ const ISSUE_BOARD_COLUMN_RESULT_LIMIT = 200;
 const INITIAL_ISSUE_ROW_RENDER_LIMIT = 100;
 const ISSUE_ROW_RENDER_BATCH_SIZE = 150;
 const ISSUE_SCROLL_LOAD_THRESHOLD_PX = 320;
+
+function findIssuesScrollContainer(element: HTMLElement | null): HTMLElement | null {
+  if (!element || typeof window === "undefined") return null;
+  let current = element.parentElement;
+  while (current && current !== document.body && current !== document.documentElement) {
+    const overflowY = window.getComputedStyle(current).overflowY;
+    if (
+      (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay")
+      && current.scrollHeight > current.clientHeight
+    ) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
 const boardIssueStatuses = ISSUE_STATUSES;
 const issueStatusLabels: Record<IssueStatus, string> = {
   backlog: "Backlog",
@@ -486,6 +502,7 @@ export function IssuesList({
   onSearchChange,
   onUpdateIssue,
 }: IssuesListProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const { selectedCompanyId } = useCompany();
   const { openNewIssue } = useDialogActions();
   const { data: session } = useQuery({
@@ -1016,27 +1033,31 @@ export function IssuesList({
   useEffect(() => {
     if (!canLoadMoreIssues) return;
     let animationFrameId: number | null = null;
+    const scrollContainer = findIssuesScrollContainer(rootRef.current);
+    const scrollTarget: Window | HTMLElement = scrollContainer ?? window;
 
     const checkScrollPosition = () => {
       if (animationFrameId !== null) return;
       animationFrameId = window.requestAnimationFrame(() => {
         animationFrameId = null;
-        const documentElement = document.documentElement;
-        if (documentElement.scrollHeight === 0) return;
-        const scrollBottom = window.scrollY + window.innerHeight;
-        const threshold = documentElement.scrollHeight - ISSUE_SCROLL_LOAD_THRESHOLD_PX;
+        const scrollHeight = scrollContainer?.scrollHeight ?? document.documentElement.scrollHeight;
+        if (scrollHeight === 0) return;
+        const scrollBottom = scrollContainer
+          ? scrollContainer.scrollTop + scrollContainer.clientHeight
+          : window.scrollY + window.innerHeight;
+        const threshold = scrollHeight - ISSUE_SCROLL_LOAD_THRESHOLD_PX;
         if (scrollBottom >= threshold) {
           loadMoreIssueRows();
         }
       });
     };
 
-    window.addEventListener("scroll", checkScrollPosition, { passive: true });
+    scrollTarget.addEventListener("scroll", checkScrollPosition, { passive: true });
     window.addEventListener("resize", checkScrollPosition);
     checkScrollPosition();
 
     return () => {
-      window.removeEventListener("scroll", checkScrollPosition);
+      scrollTarget.removeEventListener("scroll", checkScrollPosition);
       window.removeEventListener("resize", checkScrollPosition);
       if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
     };
@@ -1094,7 +1115,7 @@ export function IssuesList({
   let remainingRowsToRender = viewState.viewMode === "list" ? renderedIssueRowLimit : Number.POSITIVE_INFINITY;
 
   return (
-    <div className="space-y-4">
+    <div ref={rootRef} className="space-y-4">
       {progressSummary ? (
         <SubIssueProgressSummaryStrip summary={progressSummary} issueLinkState={issueLinkState} />
       ) : null}
