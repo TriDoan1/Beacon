@@ -261,6 +261,61 @@ describe("IssueRow", () => {
     });
   });
 
+  it("renders the disposition badge for live and invalid dispositions", () => {
+    const root = createRoot(container);
+    const liveIssue = createIssue({
+      executionDisposition: { kind: "live", path: "active_run" },
+    });
+    act(() => {
+      root.render(<IssueRow issue={liveIssue} />);
+    });
+    let badge = container.querySelector("[data-execution-disposition-kind]");
+    expect(badge?.getAttribute("data-execution-disposition-category")).toBe("live");
+    act(() => root.unmount());
+
+    const root2 = createRoot(container);
+    const stalledIssue = createIssue({
+      status: "in_review",
+      executionDisposition: {
+        kind: "invalid",
+        reason: "in_review_without_action_path",
+        suggestedCorrection: "fix",
+      },
+    });
+    act(() => {
+      root2.render(<IssueRow issue={stalledIssue} />);
+    });
+    badge = container.querySelector("[data-execution-disposition-kind]");
+    expect(badge?.getAttribute("data-execution-disposition-category")).toBe("invalid");
+    expect(badge?.textContent).toContain("Stalled");
+    act(() => root2.unmount());
+  });
+
+  it("hides the disposition badge when the explicit waiting pill already conveys the same signal", () => {
+    const root = createRoot(container);
+    const issue = createIssue({
+      blockerAttention: {
+        state: "covered",
+        reason: "explicit_waiting",
+        unresolvedBlockerCount: 0,
+        coveredBlockerCount: 0,
+        stalledBlockerCount: 0,
+        attentionBlockerCount: 0,
+        sampleBlockerIdentifier: null,
+        sampleStalledBlockerIdentifier: null,
+        nextActionOwner: { type: "user", agentId: null, userId: null },
+        nextActionHint: "needs_human_review",
+      },
+      executionDisposition: { kind: "waiting", path: "interaction" },
+    });
+    act(() => {
+      root.render(<IssueRow issue={issue} />);
+    });
+    const badge = container.querySelector("[data-execution-disposition-kind]");
+    expect(badge).toBeNull();
+    act(() => root.unmount());
+  });
+
   it("renders without error when titleSuffix is omitted", () => {
     const root = createRoot(container);
 

@@ -15,6 +15,7 @@ import { IssueRow } from "@/components/IssueRow";
 import { MetricCard } from "@/components/MetricCard";
 import { PriorityIcon } from "@/components/PriorityIcon";
 import { ProductivityReviewBadge } from "@/components/ProductivityReviewBadge";
+import { IssueDispositionBadge } from "@/components/IssueDispositionBadge";
 import { QuotaBar } from "@/components/QuotaBar";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StatusIcon } from "@/components/StatusIcon";
@@ -855,6 +856,45 @@ function StatusLanguage() {
             chip strip beneath the regular blocker chips. The trailing imperative pluralizes when multiple stalled
             leaves are surfaced ("reviews"/"them") to match the chip strip.
           </p>
+        </Section>
+
+        <Section eyebrow="Execution disposition" title="Canonical disposition badges">
+          <p className="mb-4 max-w-3xl text-sm leading-6 text-muted-foreground">
+            The badge derives every category from the API's <code>executionDisposition</code> field —
+            the same classifier the recovery and transition guard services use. The board reads this
+            instead of inferring health from status alone.
+          </p>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {[
+              { label: "Live · active run", disposition: { kind: "live", path: "active_run" } as const },
+              { label: "Live · queued wake", disposition: { kind: "live", path: "queued_wake" } as const },
+              { label: "Ready · dispatchable", disposition: { kind: "dispatchable", wakeTarget: "agent-1" } as const },
+              { label: "Waiting · interaction", disposition: { kind: "waiting", path: "interaction" } as const },
+              { label: "Waiting · approval", disposition: { kind: "waiting", path: "approval" } as const },
+              { label: "Waiting · participant", disposition: { kind: "waiting", path: "participant" } as const },
+              { label: "Blocked · chain", disposition: { kind: "waiting", path: "blocker_chain" } as const },
+              { label: "Recovery · continuation", disposition: { kind: "recoverable_by_control_plane", recovery: "continuation" } as const },
+              { label: "Continuable · 1/2", disposition: { kind: "agent_continuable", continuationAttempt: 1, maxAttempts: 2 } as const },
+              { label: "Needs manager", disposition: { kind: "human_escalation_required", owner: "manager" } as const },
+              { label: "Needs board", disposition: { kind: "human_escalation_required", owner: "board" } as const },
+              {
+                label: "Stalled review",
+                disposition: {
+                  kind: "invalid",
+                  reason: "in_review_without_action_path",
+                  suggestedCorrection: "Add participant or move out of review",
+                } as const,
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/70 p-4"
+              >
+                <span className="text-sm">{item.label}</span>
+                <IssueDispositionBadge disposition={item.disposition} hideForResting={false} hideForTerminal={false} />
+              </div>
+            ))}
+          </div>
         </Section>
 
         <Section eyebrow="Productivity review" title="Yellow accountability state on source issues">

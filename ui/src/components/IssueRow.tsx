@@ -11,6 +11,7 @@ import { formatAssigneeUserLabel } from "../lib/assignees";
 import { cn } from "../lib/utils";
 import { StatusIcon } from "./StatusIcon";
 import { productivityReviewTriggerLabel } from "./ProductivityReviewBadge";
+import { IssueDispositionBadge, dispositionCategory } from "./IssueDispositionBadge";
 
 type UnreadState = "hidden" | "visible" | "fading";
 
@@ -130,6 +131,19 @@ export function IssueRow({
       Waiting
     </span>
   ) : null;
+  // Disposition badge: skip when the existing waiting/recovery affordance already conveys the same
+  // signal (explicit waiting pill or blockerAttention recovery_needed copy), so we don't double up.
+  const dispositionForBadge = (() => {
+    const category = dispositionCategory(issue.executionDisposition);
+    if (!category) return null;
+    if (category === "terminal" || category === "resting" || category === "dispatchable") return null;
+    if (category === "waiting" && isExplicitWaiting) return null;
+    if (category === "recovery" && issue.blockerAttention?.state === "recovery_needed") return null;
+    return issue.executionDisposition ?? null;
+  })();
+  const dispositionBadge = dispositionForBadge ? (
+    <IssueDispositionBadge disposition={dispositionForBadge} />
+  ) : null;
   const productivityReviewIndicator = productivityReview ? (
     <span
       className={cn(
@@ -213,18 +227,20 @@ export function IssueRow({
           ) : null}
         </span>
       </span>
-      {(desktopTrailing || trailingMeta || desktopWaitingPill) ? (
+      {(desktopTrailing || trailingMeta || desktopWaitingPill || dispositionBadge) ? (
         <span className="ml-auto hidden shrink-0 items-center gap-2 sm:order-3 sm:flex sm:gap-3">
           {desktopWaitingPill}
+          {dispositionBadge}
           {desktopTrailing}
           {trailingMeta ? (
             <span className="text-xs text-muted-foreground">{trailingMeta}</span>
           ) : null}
         </span>
       ) : null}
-      {mobileWaitingPill ? (
-        <span className="ml-auto inline-flex shrink-0 items-center sm:hidden">
+      {mobileWaitingPill || dispositionBadge ? (
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 sm:hidden">
           {mobileWaitingPill}
+          {dispositionBadge}
         </span>
       ) : null}
       {showUnreadSlot ? (

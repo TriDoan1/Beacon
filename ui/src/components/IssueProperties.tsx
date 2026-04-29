@@ -27,6 +27,7 @@ import { formatAssigneeUserLabel } from "../lib/assignees";
 import { buildExecutionPolicy, stageParticipantValues } from "../lib/issue-execution-policy";
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
+import { IssueDispositionBadge, dispositionCategory, dispositionDetailLabel } from "./IssueDispositionBadge";
 import { Identity } from "./Identity";
 import { IssueReferencePill } from "./IssueReferencePill";
 import { formatDate, cn, projectUrl } from "../lib/utils";
@@ -1048,6 +1049,20 @@ export function IssueProperties({
             onChange={(status) => onUpdate({ status })}
             showLabel
           />
+          {(() => {
+            const category = dispositionCategory(issue.executionDisposition);
+            if (!category) return null;
+            if (category === "terminal" || category === "resting" || category === "dispatchable") return null;
+            const detail = dispositionDetailLabel(issue.executionDisposition);
+            return (
+              <span className="inline-flex items-center gap-1.5">
+                <IssueDispositionBadge disposition={issue.executionDisposition ?? null} />
+                {detail ? (
+                  <span className="text-xs text-muted-foreground">{detail}</span>
+                ) : null}
+              </span>
+            );
+          })()}
         </PropertyRow>
 
         <PropertyRow label="Priority">
