@@ -24,6 +24,7 @@ const mockHeartbeatService = vi.hoisted(() => ({
   getRun: vi.fn(async () => null),
   getActiveRunForAgent: vi.fn(async () => null),
   cancelRun: vi.fn(async () => null),
+  cancelIssueRuns: vi.fn(async () => ({ runs: [], wakeups: [] })),
 }));
 
 const mockAgentService = vi.hoisted(() => ({
@@ -110,6 +111,7 @@ vi.mock("../services/routines.js", () => ({
 vi.mock("../services/index.js", () => ({
   accessService: () => mockAccessService,
   agentService: () => mockAgentService,
+  companyService: () => ({}),
   documentService: () => ({}),
   executionWorkspaceService: () => ({}),
   feedbackService: () => mockFeedbackService,
@@ -221,6 +223,7 @@ describe.sequential("issue comment reopen routes", () => {
     mockHeartbeatService.getRun.mockReset();
     mockHeartbeatService.getActiveRunForAgent.mockReset();
     mockHeartbeatService.cancelRun.mockReset();
+    mockHeartbeatService.cancelIssueRuns.mockReset();
     mockAgentService.getById.mockReset();
     mockAgentService.list.mockReset();
     mockAgentService.resolveByReference.mockReset();
@@ -242,6 +245,7 @@ describe.sequential("issue comment reopen routes", () => {
     mockHeartbeatService.getRun.mockResolvedValue(null);
     mockHeartbeatService.getActiveRunForAgent.mockResolvedValue(null);
     mockHeartbeatService.cancelRun.mockResolvedValue(null);
+    mockHeartbeatService.cancelIssueRuns.mockResolvedValue({ runs: [], wakeups: [] });
     mockLogActivity.mockResolvedValue(undefined);
     mockFeedbackService.listIssueVotesForUser.mockResolvedValue([]);
     mockFeedbackService.saveIssueVote.mockResolvedValue({
@@ -967,17 +971,14 @@ describe.sequential("issue comment reopen routes", () => {
       ...issue,
       ...patch,
     }));
-    mockHeartbeatService.getRun.mockResolvedValue({
-      id: "run-1",
-      companyId: "company-1",
-      agentId: "22222222-2222-4222-8222-222222222222",
-      status: "running",
-    });
-    mockHeartbeatService.cancelRun.mockResolvedValue({
-      id: "run-1",
-      companyId: "company-1",
-      agentId: "22222222-2222-4222-8222-222222222222",
-      status: "cancelled",
+    mockHeartbeatService.cancelIssueRuns.mockResolvedValue({
+      runs: [{
+        id: "run-1",
+        companyId: "company-1",
+        agentId: "22222222-2222-4222-8222-222222222222",
+        status: "cancelled",
+      }],
+      wakeups: [],
     });
 
     const res = await request(await installActor(createApp()))
@@ -985,8 +986,11 @@ describe.sequential("issue comment reopen routes", () => {
       .send({ status: "cancelled" });
 
     expect(res.status).toBe(200);
-    expect(mockHeartbeatService.getRun).toHaveBeenCalledWith("run-1");
-    expect(mockHeartbeatService.cancelRun).toHaveBeenCalledWith("run-1");
+    expect(mockHeartbeatService.cancelIssueRuns).toHaveBeenCalledWith({
+      companyId: "company-1",
+      issueId: "11111111-1111-4111-8111-111111111111",
+      reason: "Cancelled because the issue was marked cancelled",
+    });
     expect(mockLogActivity).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -1022,6 +1026,7 @@ describe.sequential("issue comment reopen routes", () => {
 
     expect(res.status).toBe(200);
     expect(mockHeartbeatService.cancelRun).not.toHaveBeenCalled();
+    expect(mockHeartbeatService.cancelIssueRuns).not.toHaveBeenCalled();
   });
 
   it("writes decision ids into executionState and inserts the decision inside the transaction", async () => {

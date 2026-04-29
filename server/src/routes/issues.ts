@@ -2115,10 +2115,6 @@ export function issueRoutes(
       }
     }
 
-    const runToCancelForCancelledStatus = shouldCancelActiveRunForCancelledStatus
-      ? await resolveActiveIssueRun(existing)
-      : null;
-
     if (hiddenAtRaw !== undefined) {
       updateFields.hiddenAt = hiddenAtRaw ? new Date(hiddenAtRaw) : null;
     }
@@ -2301,26 +2297,50 @@ export function issueRoutes(
       return;
     }
 
-    let cancelledStatusRunId: string | null = null;
-    if (runToCancelForCancelledStatus) {
+    const cancelledStatusRunIds: string[] = [];
+    const cancelledStatusWakeupIds: string[] = [];
+    if (shouldCancelActiveRunForCancelledStatus) {
       try {
-        const cancelled = await heartbeat.cancelRun(runToCancelForCancelledStatus.id);
-        if (cancelled) {
-          cancelledStatusRunId = cancelled.id;
+        const cancelled = await heartbeat.cancelIssueRuns({
+          companyId: issue.companyId,
+          issueId: issue.id,
+          reason: "Cancelled because the issue was marked cancelled",
+        });
+        for (const cancelledRun of cancelled.runs) {
+          cancelledStatusRunIds.push(cancelledRun.id);
           await logActivity(db, {
-            companyId: cancelled.companyId,
+            companyId: cancelledRun.companyId,
             actorType: actor.actorType,
             actorId: actor.actorId,
             agentId: actor.agentId,
             runId: actor.runId,
             action: "heartbeat.cancelled",
             entityType: "heartbeat_run",
-            entityId: cancelled.id,
-            details: { agentId: cancelled.agentId, source: "issue_status_cancelled", issueId: existing.id },
+            entityId: cancelledRun.id,
+            details: { agentId: cancelledRun.agentId, source: "issue_status_cancelled", issueId: existing.id },
+          });
+        }
+        for (const cancelledWakeup of cancelled.wakeups) {
+          cancelledStatusWakeupIds.push(cancelledWakeup.id);
+          await logActivity(db, {
+            companyId: issue.companyId,
+            actorType: actor.actorType,
+            actorId: actor.actorId,
+            agentId: actor.agentId,
+            runId: actor.runId,
+            action: "issue.wakeup_cancelled",
+            entityType: "agent_wakeup_request",
+            entityId: cancelledWakeup.id,
+            details: {
+              agentId: cancelledWakeup.agentId,
+              previousReason: cancelledWakeup.reason,
+              source: "issue_status_cancelled",
+              issueId: existing.id,
+            },
           });
         }
       } catch (err) {
-        logger.warn({ err, issueId: existing.id, runId: runToCancelForCancelledStatus.id }, "failed to cancel run for cancelled issue");
+        logger.warn({ err, issueId: existing.id }, "failed to cancel runs for cancelled issue");
         await logActivity(db, {
           companyId: existing.companyId,
           actorType: actor.actorType,
@@ -2328,8 +2348,8 @@ export function issueRoutes(
           agentId: actor.agentId,
           runId: actor.runId,
           action: "heartbeat.cancel_failed",
-          entityType: "heartbeat_run",
-          entityId: runToCancelForCancelledStatus.id,
+          entityType: "issue",
+          entityId: existing.id,
           details: { source: "issue_status_cancelled", issueId: existing.id },
         });
       }
@@ -2401,7 +2421,13 @@ export function issueRoutes(
         ...(resumeRequested === true ? { resumeIntent: true, followUpRequested: true } : {}),
         ...(reopened ? { reopened: true, reopenedFrom: reopenFromStatus } : {}),
         ...(interruptedRunId ? { interruptedRunId } : {}),
-        ...(cancelledStatusRunId ? { cancelledStatusRunId } : {}),
+        ...(cancelledStatusRunIds.length > 0
+          ? {
+              cancelledStatusRunId: cancelledStatusRunIds[0],
+              cancelledStatusRunIds,
+            }
+          : {}),
+        ...(cancelledStatusWakeupIds.length > 0 ? { cancelledStatusWakeupIds } : {}),
         _previous: hasFieldChanges ? previous : undefined,
         ...summarizeIssueReferenceActivityDetails(
           updateReferenceDiff
