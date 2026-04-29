@@ -131,6 +131,7 @@ import {
   isClosedIsolatedExecutionWorkspace,
   ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY,
   type AskUserQuestionsAnswer,
+  type AskUserQuestionsInteraction,
   type ActivityEvent,
   type Agent,
   type FeedbackVote,
@@ -622,6 +623,7 @@ type IssueDetailChatTabProps = {
     interaction: IssueThreadInteraction,
     answers: AskUserQuestionsAnswer[],
   ) => Promise<void>;
+  onCancelInteraction: (interaction: AskUserQuestionsInteraction) => Promise<void>;
 };
 
 const IssueDetailChatTab = memo(function IssueDetailChatTab({
@@ -669,6 +671,7 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
   onAcceptInteraction,
   onRejectInteraction,
   onSubmitInteractionAnswers,
+  onCancelInteraction,
 }: IssueDetailChatTabProps) {
   const { data: activity } = useQuery({
     queryKey: queryKeys.issues.activity(issueId),
@@ -871,6 +874,7 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
         onSubmitInteractionAnswers={(interaction, answers) =>
           onSubmitInteractionAnswers(interaction, answers)
         }
+        onCancelInteraction={onCancelInteraction}
         onCancelRun={runningIssueRun && onPauseWorkRun
           ? async () => {
               await onPauseWorkRun(runningIssueRun.id);
@@ -1977,6 +1981,27 @@ export function IssueDetail() {
     },
   });
 
+  const cancelInteraction = useMutation({
+    mutationFn: ({ interaction }: { interaction: AskUserQuestionsInteraction }) =>
+      issuesApi.cancelInteraction(issueId!, interaction.id),
+    onSuccess: (interaction) => {
+      upsertInteractionInCache(interaction);
+      invalidateIssueDetail();
+      invalidateIssueCollections();
+      pushToast({
+        title: "Question cancelled",
+        tone: "success",
+      });
+    },
+    onError: (err) => {
+      pushToast({
+        title: "Cancel failed",
+        body: err instanceof Error ? err.message : "Unable to cancel the question",
+        tone: "error",
+      });
+    },
+  });
+
   const addCommentAndReassign = useMutation({
     mutationFn: ({
       body,
@@ -2753,6 +2778,9 @@ export function IssueDetail() {
   ) => {
     await answerInteraction.mutateAsync({ interaction, answers });
   }, [answerInteraction]);
+  const handleCancelInteraction = useCallback(async (interaction: AskUserQuestionsInteraction) => {
+    await cancelInteraction.mutateAsync({ interaction });
+  }, [cancelInteraction]);
 
   const treePreviewAffectedIssues = useMemo(
     () => (treeControlPreview?.issues ?? []).filter((candidate) => !candidate.skipped),
@@ -3647,6 +3675,7 @@ export function IssueDetail() {
               onAcceptInteraction={handleAcceptInteraction}
               onRejectInteraction={handleRejectInteraction}
               onSubmitInteractionAnswers={handleSubmitInteractionAnswers}
+              onCancelInteraction={handleCancelInteraction}
             />
           ) : null}
         </TabsContent>

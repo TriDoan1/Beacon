@@ -146,6 +146,9 @@ interface IssueChatMessageContext {
     interaction: AskUserQuestionsInteraction,
     answers: AskUserQuestionsAnswer[],
   ) => Promise<void> | void;
+  onCancelInteraction?: (
+    interaction: AskUserQuestionsInteraction,
+  ) => Promise<void> | void;
 }
 
 const IssueChatCtx = createContext<IssueChatMessageContext>({
@@ -318,6 +321,9 @@ interface IssueChatThreadProps {
   onSubmitInteractionAnswers?: (
     interaction: AskUserQuestionsInteraction,
     answers: AskUserQuestionsAnswer[],
+  ) => Promise<void> | void;
+  onCancelInteraction?: (
+    interaction: AskUserQuestionsInteraction,
   ) => Promise<void> | void;
   composerRef?: Ref<IssueChatComposerHandle>;
   /**
@@ -1812,6 +1818,7 @@ function ExpiredRequestConfirmationActivity({
     userLabelMap,
     onAcceptInteraction,
     onRejectInteraction,
+    onCancelInteraction,
   } = useContext(IssueChatCtx);
   const [expanded, setExpanded] = useState(false);
   const hasResolvedActor = Boolean(interaction.resolvedByAgentId || interaction.resolvedByUserId);
@@ -1890,6 +1897,7 @@ function ExpiredRequestConfirmationActivity({
             userLabelMap={userLabelMap}
             onAcceptInteraction={onAcceptInteraction}
             onRejectInteraction={onRejectInteraction}
+            onCancelInteraction={onCancelInteraction}
           />
         </div>
       ) : null}
@@ -1905,6 +1913,7 @@ function IssueChatSystemMessage({ message }: { message: ThreadMessage }) {
     onAcceptInteraction,
     onRejectInteraction,
     onSubmitInteractionAnswers,
+    onCancelInteraction,
   } = useContext(IssueChatCtx);
   const custom = message.metadata.custom as Record<string, unknown>;
   const anchorId = typeof custom.anchorId === "string" ? custom.anchorId : undefined;
@@ -1951,6 +1960,7 @@ function IssueChatSystemMessage({ message }: { message: ThreadMessage }) {
             onAcceptInteraction={onAcceptInteraction}
             onRejectInteraction={onRejectInteraction}
             onSubmitInteractionAnswers={onSubmitInteractionAnswers}
+            onCancelInteraction={onCancelInteraction}
           />
         </div>
       </div>
@@ -3004,6 +3014,7 @@ export function IssueChatThread({
   onAcceptInteraction,
   onRejectInteraction,
   onSubmitInteractionAnswers,
+  onCancelInteraction,
   composerRef,
   onRefreshLatestComments,
 }: IssueChatThreadProps) {
@@ -3404,6 +3415,7 @@ export function IssueChatThread({
   const stableOnAcceptInteraction = useStableEvent(onAcceptInteraction);
   const stableOnRejectInteraction = useStableEvent(onRejectInteraction);
   const stableOnSubmitInteractionAnswers = useStableEvent(onSubmitInteractionAnswers);
+  const stableOnCancelInteraction = useStableEvent(onCancelInteraction);
 
   const chatCtx = useMemo<IssueChatMessageContext>(
     () => ({
@@ -3423,6 +3435,7 @@ export function IssueChatThread({
       onAcceptInteraction: stableOnAcceptInteraction,
       onRejectInteraction: stableOnRejectInteraction,
       onSubmitInteractionAnswers: stableOnSubmitInteractionAnswers,
+      onCancelInteraction: stableOnCancelInteraction,
     }),
     [
       feedbackDataSharingPreference,
@@ -3441,6 +3454,7 @@ export function IssueChatThread({
       stableOnAcceptInteraction,
       stableOnRejectInteraction,
       stableOnSubmitInteractionAnswers,
+      stableOnCancelInteraction,
     ],
   );
 
