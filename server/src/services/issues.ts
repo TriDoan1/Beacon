@@ -59,6 +59,7 @@ import {
   isLiveExplicitApprovalWaitingPath,
   isLiveExplicitInteractionWaitingPath,
 } from "./recovery/explicit-waiting-paths.js";
+import { assertIssueTransitionAllowed } from "./issue-transition-guard.js";
 
 const ALL_ISSUE_STATUSES = ["backlog", "todo", "in_progress", "in_review", "blocked", "done", "cancelled"];
 const MAX_ISSUE_COMMENT_PAGE_LIMIT = 500;
@@ -3230,6 +3231,15 @@ export function issueService(db: Db) {
             tx,
           );
         }
+        await assertIssueTransitionAllowed({
+          db: tx,
+          issue,
+          source: "create",
+          statusTouched: true,
+          assigneeTouched: issueData.assigneeAgentId !== undefined || issueData.assigneeUserId !== undefined,
+          blockerTouched: blockedByIssueIds !== undefined,
+          executionStateTouched: issueData.executionState !== undefined,
+        });
         const [enriched] = await withIssueLabels(tx, [issue]);
         return enriched;
       });
@@ -3383,6 +3393,15 @@ export function issueService(db: Db) {
             tx,
           );
         }
+        await assertIssueTransitionAllowed({
+          db: tx,
+          issue: updated,
+          source: "update",
+          statusTouched: issueData.status !== undefined,
+          assigneeTouched: issueData.assigneeAgentId !== undefined || issueData.assigneeUserId !== undefined,
+          blockerTouched: blockedByIssueIds !== undefined,
+          executionStateTouched: issueData.executionState !== undefined,
+        });
         const [enriched] = await withIssueLabels(tx, [updated]);
         return enriched;
       };
