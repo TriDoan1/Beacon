@@ -27,7 +27,6 @@ import { formatAssigneeUserLabel } from "../lib/assignees";
 import { buildExecutionPolicy, stageParticipantValues } from "../lib/issue-execution-policy";
 import { StatusIcon } from "./StatusIcon";
 import { PriorityIcon } from "./PriorityIcon";
-import { IssueDispositionBadge, dispositionDetailLabel, shouldShowDispositionBadge } from "./IssueDispositionBadge";
 import { Identity } from "./Identity";
 import { IssueReferencePill } from "./IssueReferencePill";
 import { formatDate, cn, projectUrl } from "../lib/utils";
@@ -1049,31 +1048,6 @@ export function IssueProperties({
             onChange={(status) => onUpdate({ status })}
             showLabel
           />
-          {(() => {
-            // Mirror IssueRow's suppression: if the chat-thread IssueBlockedNotice already
-            // conveys the same signal (explicit waiting or recovery_needed), skip the badge so
-            // the detail page doesn't double-render the same state.
-            const isExplicitWaiting =
-              issue.blockerAttention?.state === "covered"
-              && issue.blockerAttention?.reason === "explicit_waiting";
-            if (
-              !shouldShowDispositionBadge(issue.executionDisposition, {
-                isExplicitWaiting,
-                blockerAttentionState: issue.blockerAttention?.state ?? null,
-              })
-            ) {
-              return null;
-            }
-            const detail = dispositionDetailLabel(issue.executionDisposition);
-            return (
-              <span className="inline-flex items-center gap-1.5">
-                <IssueDispositionBadge disposition={issue.executionDisposition ?? null} />
-                {detail ? (
-                  <span className="text-xs text-muted-foreground">{detail}</span>
-                ) : null}
-              </span>
-            );
-          })()}
         </PropertyRow>
 
         <PropertyRow label="Priority">

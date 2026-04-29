@@ -11,7 +11,6 @@ import { formatAssigneeUserLabel } from "../lib/assignees";
 import { cn } from "../lib/utils";
 import { StatusIcon } from "./StatusIcon";
 import { productivityReviewTriggerLabel } from "./ProductivityReviewBadge";
-import { IssueDispositionBadge, shouldShowDispositionBadge } from "./IssueDispositionBadge";
 
 type UnreadState = "hidden" | "visible" | "fading";
 
@@ -131,16 +130,6 @@ export function IssueRow({
       Waiting
     </span>
   ) : null;
-  // Skip the disposition badge when the existing waiting/recovery affordance already conveys the
-  // same signal (explicit waiting pill or blockerAttention recovery_needed copy), so we don't
-  // double up.
-  const showDispositionBadge = shouldShowDispositionBadge(issue.executionDisposition, {
-    isExplicitWaiting,
-    blockerAttentionState: issue.blockerAttention?.state ?? null,
-  });
-  const dispositionBadge = showDispositionBadge ? (
-    <IssueDispositionBadge disposition={issue.executionDisposition ?? null} />
-  ) : null;
   const productivityReviewIndicator = productivityReview ? (
     <span
       className={cn(
@@ -224,20 +213,18 @@ export function IssueRow({
           ) : null}
         </span>
       </span>
-      {(desktopTrailing || trailingMeta || desktopWaitingPill || dispositionBadge) ? (
+      {(desktopTrailing || trailingMeta || desktopWaitingPill) ? (
         <span className="ml-auto hidden shrink-0 items-center gap-2 sm:order-3 sm:flex sm:gap-3">
           {desktopWaitingPill}
-          {dispositionBadge}
           {desktopTrailing}
           {trailingMeta ? (
             <span className="text-xs text-muted-foreground">{trailingMeta}</span>
           ) : null}
         </span>
       ) : null}
-      {mobileWaitingPill || dispositionBadge ? (
+      {mobileWaitingPill ? (
         <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 sm:hidden">
           {mobileWaitingPill}
-          {dispositionBadge}
         </span>
       ) : null}
       {showUnreadSlot ? (
