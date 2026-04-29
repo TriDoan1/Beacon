@@ -24,7 +24,7 @@ import {
 } from "@paperclipai/db";
 import { parseObject, asBoolean, asNumber } from "../../adapters/utils.js";
 import { runningProcesses } from "../../adapters/index.js";
-import { forbidden, notFound } from "../../errors.js";
+import { badRequest, conflict, forbidden, notFound } from "../../errors.js";
 import { logger } from "../../middleware/logger.js";
 import { redactCurrentUserText } from "../../log-redaction.js";
 import { redactSensitiveText } from "../../redaction.js";
@@ -64,6 +64,7 @@ import {
 } from "../issue-execution-disposition.js";
 
 const EXECUTION_PATH_HEARTBEAT_RUN_STATUSES = ["queued", "running", "scheduled_retry"] as const;
+const CANCELLABLE_ACTIVE_RUN_RECOVERY_STATUSES = ["queued", "running", "scheduled_retry"] as const;
 const UNSUCCESSFUL_HEARTBEAT_RUN_TERMINAL_STATUSES = ["failed", "cancelled", "timed_out"] as const;
 export const ACTIVE_RUN_OUTPUT_SUSPICION_THRESHOLD_MS = 60 * 60 * 1000;
 export const ACTIVE_RUN_OUTPUT_CRITICAL_THRESHOLD_MS = 4 * 60 * 60 * 1000;
@@ -111,6 +112,8 @@ type WatchdogDecisionActor =
   | { type: "board"; userId?: string | null; runId?: string | null }
   | { type: "agent"; agentId?: string | null; runId?: string | null }
   | { type: "none" };
+
+type WatchdogDecision = "snooze" | "continue" | "dismissed_false_positive" | "cancel_run";
 
 export type RunOutputSilenceSummary = {
   lastOutputAt: Date | null;
@@ -1342,7 +1345,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   async function recordWatchdogDecision(input: {
     runId: string;
     actor: WatchdogDecisionActor;
-    decision: "snooze" | "continue" | "dismissed_false_positive";
+    decision: WatchdogDecision;
     evaluationIssueId?: string | null;
     reason?: string | null;
     snoozedUntil?: Date | null;
@@ -1355,6 +1358,15 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       .where(eq(heartbeatRuns.id, input.runId))
       .limit(1);
     if (!run) throw notFound("Heartbeat run not found");
+
+    const normalizedReason = typeof input.reason === "string" ? input.reason.trim() : "";
+    if (input.decision === "cancel_run") {
+      if (!normalizedReason) throw badRequest("Cancellation reason is required");
+      if (!input.evaluationIssueId) throw badRequest("evaluationIssueId is required for cancellation");
+      if (!CANCELLABLE_ACTIVE_RUN_RECOVERY_STATUSES.includes(run.status as (typeof CANCELLABLE_ACTIVE_RUN_RECOVERY_STATUSES)[number])) {
+        throw conflict("Heartbeat run is not cancellable", { status: run.status });
+      }
+    }
 
     let evaluationIssue: {
       id: string;
@@ -1442,7 +1454,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         evaluationIssueId: input.evaluationIssueId ?? null,
         decision: input.decision,
         snoozedUntil: effectiveSnoozedUntil,
-        reason: input.reason ?? null,
+        reason: input.decision === "cancel_run" ? normalizedReason : input.reason ?? null,
         createdByAgentId: input.actor.type === "agent" ? input.actor.agentId ?? null : null,
         createdByUserId: input.actor.type === "board" ? input.actor.userId ?? null : null,
         createdByRunId,
@@ -1459,15 +1471,21 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           : "unknown",
       agentId: input.actor.type === "agent" ? input.actor.agentId ?? null : null,
       runId: run.id,
-      action: input.decision === "snooze" ? "heartbeat.watchdog_snoozed" : "heartbeat.watchdog_decision_recorded",
+      action: input.decision === "snooze"
+        ? "heartbeat.watchdog_snoozed"
+        : input.decision === "cancel_run"
+          ? "heartbeat.watchdog_cancel_requested"
+          : "heartbeat.watchdog_decision_recorded",
       entityType: "heartbeat_run",
       entityId: run.id,
       details: {
         source: "recovery.record_watchdog_decision",
         decision: input.decision,
         evaluationIssueId: input.evaluationIssueId ?? null,
+        targetRunId: run.id,
         snoozedUntil: effectiveSnoozedUntil?.toISOString() ?? null,
-        reason: input.reason ?? null,
+        reason: input.decision === "cancel_run" ? normalizedReason : input.reason ?? null,
+        createdByRunId,
       },
     });
 
