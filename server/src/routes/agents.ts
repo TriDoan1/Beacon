@@ -98,7 +98,8 @@ function readRunLogLimitBytes(value: unknown) {
 function readLiveRunsQueryInt(value: unknown, max: number, fallback = 0) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(0, Math.min(max, Math.trunc(parsed)));
+  if (parsed <= 0) return fallback;
+  return Math.min(max, Math.trunc(parsed));
 }
 
 export function agentRoutes(

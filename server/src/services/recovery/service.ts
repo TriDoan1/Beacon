@@ -194,8 +194,7 @@ function isSuccessfulInProgressContinuationRun(latestRun: LatestIssueRun) {
 
 function isProductiveContinuationRun(latestRun: LatestIssueRun) {
   return latestRun?.status === "succeeded" &&
-    (latestRun.livenessState === "advanced" ||
-      latestRun.livenessState === "completed" ||
+    (latestRun.livenessState === "completed" ||
       latestRun.livenessState === "blocked" ||
       latestRun.livenessState === "needs_followup");
 }
