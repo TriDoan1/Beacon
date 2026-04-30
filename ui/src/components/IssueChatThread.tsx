@@ -1540,26 +1540,26 @@ function IssueChatAssistantMessage({
                       <Copy className="mr-2 h-3.5 w-3.5" />
                       Copy message
                     </DropdownMenuItem>
-                      {canStopRun && onStopRun && runId ? (
-                        <DropdownMenuItem
-                          disabled={isStoppingRun}
-                          className={cn(
-                            stopRunVariant === "pause"
-                              ? "text-amber-700 focus:text-amber-800 dark:text-amber-300 dark:focus:text-amber-200"
-                              : "text-red-700 focus:text-red-800 dark:text-red-300 dark:focus:text-red-200",
-                          )}
-                          onSelect={() => {
-                            void onStopRun(runId);
-                          }}
-                        >
-                          {stopRunVariant === "pause" ? (
-                            <PauseCircle className="mr-2 h-3.5 w-3.5" />
-                          ) : (
-                            <Square className="mr-2 h-3.5 w-3.5 fill-current" />
-                          )}
-                          {isStoppingRun ? stoppingRunLabel : stopRunLabel}
-                        </DropdownMenuItem>
-                      ) : null}
+                    {canStopRun && onStopRun && runId ? (
+                      <DropdownMenuItem
+                        disabled={isStoppingRun}
+                        className={cn(
+                          stopRunVariant === "pause"
+                            ? "text-amber-700 focus:text-amber-800 dark:text-amber-300 dark:focus:text-amber-200"
+                            : "text-red-700 focus:text-red-800 dark:text-red-300 dark:focus:text-red-200",
+                        )}
+                        onSelect={() => {
+                          void onStopRun(runId);
+                        }}
+                      >
+                        {stopRunVariant === "pause" ? (
+                          <PauseCircle className="mr-2 h-3.5 w-3.5" />
+                        ) : (
+                          <Square className="mr-2 h-3.5 w-3.5 fill-current" />
+                        )}
+                        {isStoppingRun ? stoppingRunLabel : stopRunLabel}
+                      </DropdownMenuItem>
+                    ) : null}
                     {runHref ? (
                       <DropdownMenuItem asChild>
                         <Link to={runHref} target="_blank" rel="noreferrer noopener">
@@ -3132,6 +3132,8 @@ export function IssueChatThread({
   const lastUserMessageIdRef = useRef<string | null>(null);
   const spacerBaselineAnchorRef = useRef<string | null>(null);
   const spacerInitialReserveRef = useRef(0);
+  const latestSettleTimeoutsRef = useRef<number[]>([]);
+  const latestSettleCleanupRef = useRef<(() => void) | null>(null);
   const [bottomSpacerHeight, setBottomSpacerHeight] = useState(0);
   const displayLiveRuns = useMemo(() => {
     const deduped = new Map<string, LiveRunForIssue>();
@@ -3172,6 +3174,17 @@ export function IssueChatThread({
     }
     return ids;
   }, [displayLiveRuns]);
+  const clearLatestSettleTimeouts = useCallback(() => {
+    for (const timeout of latestSettleTimeoutsRef.current) {
+      window.clearTimeout(timeout);
+    }
+    latestSettleTimeoutsRef.current = [];
+    latestSettleCleanupRef.current?.();
+    latestSettleCleanupRef.current = null;
+  }, []);
+
+  useEffect(() => clearLatestSettleTimeouts, [clearLatestSettleTimeouts]);
+
   const { transcriptByRun, hasOutputForRun } = useLiveRunTranscripts({
     runs: enableLiveTranscriptPolling ? transcriptRuns : [],
     companyId,
@@ -3435,16 +3448,52 @@ export function IssueChatThread({
     const TICK_MS = 80;
     const TOLERANCE_PX = 4;
 
+    clearLatestSettleTimeouts();
     const resolveScrollContainer = (): HTMLElement | null =>
       (document.getElementById("main-content") as HTMLElement | null);
+    const cancelTarget = resolveScrollContainer() ?? window;
 
     let lastScrollTop = -1;
     let lastScrollHeight = -1;
     let stableTicks = 0;
+    let cancelled = false;
+
+    const cancel = () => {
+      cancelled = true;
+    };
+
+    const cleanup = () => {
+      cancelTarget.removeEventListener("wheel", cancel);
+      cancelTarget.removeEventListener("touchstart", cancel);
+    };
+
+    cancelTarget.addEventListener("wheel", cancel, { once: true, passive: true });
+    cancelTarget.addEventListener("touchstart", cancel, { once: true, passive: true });
+    latestSettleCleanupRef.current = cleanup;
+
+    const finish = () => {
+      cleanup();
+      latestSettleCleanupRef.current = null;
+      for (const timeout of latestSettleTimeoutsRef.current) {
+        window.clearTimeout(timeout);
+      }
+      latestSettleTimeoutsRef.current = [];
+    };
+
+    const scheduleTick = (delay: number) => {
+      const timeout = window.setTimeout(() => {
+        latestSettleTimeoutsRef.current = latestSettleTimeoutsRef.current.filter((entry) => entry !== timeout);
+        tick();
+      }, delay);
+      latestSettleTimeoutsRef.current.push(timeout);
+    };
 
     const tick = () => {
       const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
-      if (now - startedAt > MAX_DURATION_MS) return;
+      if (cancelled || now - startedAt > MAX_DURATION_MS) {
+        finish();
+        return;
+      }
 
       const el = document.getElementById(latestCommentAnchor);
       if (!el) {
@@ -3454,7 +3503,7 @@ export function IssueChatThread({
           align: "end",
           behavior: "auto",
         });
-        window.setTimeout(tick, TICK_MS);
+        scheduleTick(TICK_MS);
         return;
       }
 
@@ -3476,19 +3525,22 @@ export function IssueChatThread({
       const atBottom = Math.abs(offBottom) <= TOLERANCE_PX;
       if (scrollStable && heightStable && atBottom) {
         stableTicks += 1;
-        if (stableTicks >= 3) return;
+        if (stableTicks >= 3) {
+          finish();
+          return;
+        }
       } else {
         stableTicks = 0;
       }
       lastScrollTop = currentScrollTop;
       lastScrollHeight = currentScrollHeight;
-      window.setTimeout(tick, TICK_MS);
+      scheduleTick(TICK_MS);
     };
 
     // Hold the first iteration off for one frame so the initial smooth
     // scroll has begun (and the virtualizer has rendered the buffer around
     // the target) before we start settling.
-    window.setTimeout(tick, 120);
+    scheduleTick(120);
   }
 
   function handleJumpToLatest() {
