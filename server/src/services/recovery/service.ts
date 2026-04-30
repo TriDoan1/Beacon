@@ -189,12 +189,13 @@ function isUnsuccessfulTerminalIssueRun(latestRun: LatestIssueRun) {
 }
 
 function isSuccessfulInProgressContinuationRun(latestRun: LatestIssueRun) {
-  return latestRun?.status === "succeeded" && latestRun.livenessState !== "advanced";
+  return latestRun?.status === "succeeded";
 }
 
 function isProductiveContinuationRun(latestRun: LatestIssueRun) {
   return latestRun?.status === "succeeded" &&
-    (latestRun.livenessState === "completed" ||
+    (latestRun.livenessState === "advanced" ||
+      latestRun.livenessState === "completed" ||
       latestRun.livenessState === "blocked" ||
       latestRun.livenessState === "needs_followup");
 }

@@ -106,28 +106,6 @@ describe("run liveness continuations", () => {
     expect(decision.nextAttempt).toBe(2);
   });
 
-  it("enqueues advanced terminal runs so progress is not mistaken for a live path", () => {
-    const decision = decideRunLivenessContinuation({
-      run: run(),
-      issue: issue(),
-      agent: agent(),
-      livenessState: "advanced",
-      livenessReason: "Run produced concrete action evidence: created an issue comment",
-      nextAction: "Resume the implementation from the remaining acceptance criteria.",
-      budgetBlocked: false,
-      idempotentWakeExists: false,
-    });
-
-    expect(decision.kind).toBe("enqueue");
-    if (decision.kind !== "enqueue") return;
-    expect(decision.payload).toMatchObject({
-      issueId,
-      sourceRunId: runId,
-      livenessState: "advanced",
-      instruction: "Resume the implementation from the remaining acceptance criteria.",
-    });
-  });
-
   it("does not enqueue a third continuation and returns an exhaustion comment", () => {
     const decision = decideRunLivenessContinuation({
       run: run({ continuationAttempt: 2 }),
@@ -148,7 +126,7 @@ describe("run liveness continuations", () => {
 
   it("skips non-actionable and guarded issues", () => {
     const guardedCases = [
-      { livenessState: "needs_followup" as const },
+      { livenessState: "advanced" as const },
       { issue: issue({ status: "done" }) },
       { issue: issue({ assigneeAgentId: "other-agent" }) },
       { issue: issue({ executionState: { status: "pending" } }) },
