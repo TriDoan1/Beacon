@@ -84,6 +84,7 @@ import {
   issueTreeControlService,
 } from "./issue-tree-control.js";
 import {
+  continuationSummaryParksExecutor,
   getIssueContinuationSummaryDocument,
   refreshIssueContinuationSummary,
 } from "./issue-continuation-summary.js";
@@ -4026,6 +4027,37 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
     const wakeCommentId = deriveCommentId(context, null);
     const isInteractionWake = allowsIssueInteractionWake(context);
     const resumeIntent = context.resumeIntent === true || context.followUpRequested === true;
+    const wakeReason = readNonEmptyString(context.wakeReason);
+    const retryReason = readNonEmptyString(context.retryReason);
+
+    if (
+      issue.status === "in_progress" &&
+      !wakeCommentId &&
+      (wakeReason === "issue_continuation_needed" || retryReason === "issue_continuation_needed")
+    ) {
+      const queuedWake = parseObject(context.paperclipWake);
+      const queuedContinuationSummary =
+        readNonEmptyString(parseObject(context.paperclipContinuationSummary).body) ??
+        readNonEmptyString(parseObject(queuedWake.continuationSummary).body);
+      const currentContinuationSummary = queuedContinuationSummary
+        ? null
+        : await getIssueContinuationSummaryDocument(db, issueId);
+      const continuationSummaryBody = queuedContinuationSummary ?? currentContinuationSummary?.body ?? null;
+      if (continuationSummaryParksExecutor(continuationSummaryBody)) {
+        return {
+          stale: true,
+          errorCode: "issue_continuation_waiting_on_review",
+          reason:
+            "Cancelled because the continuation summary says the executor should wait for reviewer feedback or approval before more work starts",
+          details: {
+            issueId,
+            wakeReason,
+            retryReason,
+            nextAction: continuationSummaryBody,
+          },
+        };
+      }
+    }
 
     if (issue.assigneeAgentId !== run.agentId && !isInteractionWake) {
       return {

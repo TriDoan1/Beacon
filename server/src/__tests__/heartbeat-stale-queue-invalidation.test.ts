@@ -19,6 +19,7 @@ import {
   issueTreeHolds,
   issues,
 } from "@paperclipai/db";
+import { ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY } from "@paperclipai/shared";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -241,6 +242,43 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
       .set({ runId })
       .where(eq(agentWakeupRequests.id, wakeupRequestId));
     return { runId, wakeupRequestId };
+  }
+
+  async function seedContinuationSummary(input: {
+    companyId: string;
+    issueId: string;
+    agentId: string;
+    body: string;
+  }) {
+    const documentId = randomUUID();
+    const revisionId = randomUUID();
+    await db.insert(documents).values({
+      id: documentId,
+      companyId: input.companyId,
+      title: "Continuation Summary",
+      format: "markdown",
+      latestBody: input.body,
+      latestRevisionId: revisionId,
+      latestRevisionNumber: 1,
+      createdByAgentId: input.agentId,
+      updatedByAgentId: input.agentId,
+    });
+    await db.insert(documentRevisions).values({
+      id: revisionId,
+      companyId: input.companyId,
+      documentId,
+      revisionNumber: 1,
+      title: "Continuation Summary",
+      format: "markdown",
+      body: input.body,
+      createdByAgentId: input.agentId,
+    });
+    await db.insert(issueDocuments).values({
+      companyId: input.companyId,
+      issueId: input.issueId,
+      documentId,
+      key: ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY,
+    });
   }
 
   it("cancels queued runs when the issue assignee changes before the run starts", async () => {
@@ -561,5 +599,76 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
     expect(run?.status).toBe("succeeded");
     expect(run?.errorCode).toBeNull();
     expect(mockAdapterExecute).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels queued continuation recovery when the continuation summary parks executor work for review", async () => {
+    const { companyId, agentId } = await seedCompanyAndAgent();
+    const issueId = randomUUID();
+    await db.insert(issues).values({
+      id: issueId,
+      companyId,
+      title: "Implementation parked for review",
+      status: "in_progress",
+      priority: "medium",
+      assigneeAgentId: agentId,
+    });
+    await seedContinuationSummary({
+      companyId,
+      issueId,
+      agentId,
+      body: [
+        "# Continuation Summary",
+        "",
+        "## Next Action",
+        "",
+        "- Wait for reviewer feedback or approval before continuing executor work.",
+      ].join("\n"),
+    });
+
+    const { runId, wakeupRequestId } = await seedQueuedRun({
+      companyId,
+      agentId,
+      issueId,
+      wakeReason: "issue_continuation_needed",
+      invocationSource: "automation",
+      contextExtras: {
+        retryReason: "issue_continuation_needed",
+      },
+    });
+
+    await heartbeat.resumeQueuedRuns();
+
+    await waitForCondition(async () => {
+      const run = await db
+        .select({ status: heartbeatRuns.status })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, runId))
+        .then((rows) => rows[0] ?? null);
+      return run?.status === "cancelled";
+    });
+
+    const [run, wakeup] = await Promise.all([
+      db
+        .select({
+          status: heartbeatRuns.status,
+          errorCode: heartbeatRuns.errorCode,
+          resultJson: heartbeatRuns.resultJson,
+        })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, runId))
+        .then((rows) => rows[0] ?? null),
+      db
+        .select({ status: agentWakeupRequests.status, error: agentWakeupRequests.error })
+        .from(agentWakeupRequests)
+        .where(eq(agentWakeupRequests.id, wakeupRequestId))
+        .then((rows) => rows[0] ?? null),
+    ]);
+
+    expect(run?.status).toBe("cancelled");
+    expect(run?.errorCode).toBe("issue_continuation_waiting_on_review");
+    expect(run?.resultJson).toMatchObject({ stopReason: "issue_continuation_waiting_on_review" });
+    expect(wakeup?.status).toBe("skipped");
+    expect(wakeup?.error).toContain("continuation summary says the executor should wait");
+    expect(mockAdapterExecute).not.toHaveBeenCalled();
   });
 });
