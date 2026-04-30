@@ -2,11 +2,17 @@
 
 import { pathToFileURL } from "node:url";
 
+const CANARY_VERSION_RE = /-canary\.\d+$/;
+
+export function isCanaryVersion(version) {
+  return CANARY_VERSION_RE.test(version);
+}
+
 function usage() {
   process.stderr.write(
     [
       "Usage:",
-      "  node scripts/verify-release-registry-state.mjs --dist-tag <tag> --target-version <version> --package <name> [--package <name> ...]",
+      "  node scripts/verify-release-registry-state.mjs --channel <canary|stable> --dist-tag <tag> --target-version <version> --package <name> [--package <name> ...] [--allow-canary-latest]",
       "",
     ].join("\n"),
   );
@@ -14,8 +20,10 @@ function usage() {
 
 function parseArgs(argv) {
   const options = {
+    channel: "",
     distTag: "",
     targetVersion: "",
+    allowCanaryLatest: false,
     packages: [],
   };
 
@@ -23,6 +31,10 @@ function parseArgs(argv) {
     const arg = argv[index];
 
     switch (arg) {
+      case "--channel":
+        options.channel = argv[index + 1] ?? "";
+        index += 1;
+        break;
       case "--dist-tag":
         options.distTag = argv[index + 1] ?? "";
         index += 1;
@@ -35,6 +47,9 @@ function parseArgs(argv) {
         options.packages.push(argv[index + 1] ?? "");
         index += 1;
         break;
+      case "--allow-canary-latest":
+        options.allowCanaryLatest = true;
+        break;
       case "-h":
       case "--help":
         usage();
@@ -42,6 +57,10 @@ function parseArgs(argv) {
       default:
         throw new Error(`unexpected argument: ${arg}`);
     }
+  }
+
+  if (options.channel !== "canary" && options.channel !== "stable") {
+    throw new Error("--channel must be canary or stable");
   }
 
   if (!options.distTag) {
@@ -54,6 +73,10 @@ function parseArgs(argv) {
 
   if (options.packages.length === 0 || options.packages.some((name) => !name)) {
     throw new Error("at least one non-empty --package value is required");
+  }
+
+  if (options.allowCanaryLatest && options.channel !== "canary") {
+    throw new Error("--allow-canary-latest only applies to canary releases");
   }
 
   return options;
@@ -103,8 +126,8 @@ export async function fetchRegistryJson(url, { allowMissing = false, timeoutMs =
   return response.json();
 }
 
-async function fetchPackageDocument(packageName) {
-  return fetchRegistryJson(createRegistryUrl(packageName));
+async function fetchPackageDocument(packageName, { allowMissing = false } = {}) {
+  return fetchRegistryJson(createRegistryUrl(packageName), { allowMissing });
 }
 
 async function fetchPackageManifest(packageName, version, { allowMissing = false } = {}) {
@@ -115,7 +138,7 @@ export function createManifestLookupKey(packageName, version) {
   return `${packageName}@${version}`;
 }
 
-function resolvePublishedManifest(packageName, version, packageDoc, packageManifestsByKey) {
+function resolvePublishedManifest(packageName, version, packageDoc, packageManifestsByKey = new Map()) {
   const directManifest = packageManifestsByKey.get(createManifestLookupKey(packageName, version));
   if (directManifest) {
     return directManifest;
@@ -128,7 +151,11 @@ function resolvePublishedManifest(packageName, version, packageDoc, packageManif
   return packageDoc?.versions?.[version] ?? null;
 }
 
-export function collectInternalDependencyProblems(manifest, packageDocsByName, packageManifestsByKey) {
+export function collectInternalDependencyProblems(
+  manifest,
+  packageDocsByName,
+  packageManifestsByKey = new Map(),
+) {
   const problems = [];
   const sections = [
     ["dependencies", manifest.dependencies ?? {}],
@@ -157,6 +184,12 @@ export function collectInternalDependencyProblems(manifest, packageDocsByName, p
       );
 
       if (!dependencyManifest) {
+        const dependencyDoc = packageDocsByName.get(dependencyName);
+        if (!dependencyDoc && !packageManifestsByKey.has(createManifestLookupKey(dependencyName, dependencyVersion))) {
+          problems.push(`${sectionName} requires ${dependencyName}@${dependencyVersion}, but that package is not published`);
+          continue;
+        }
+
         problems.push(
           `${sectionName} requires ${dependencyName}@${dependencyVersion}, but npm does not expose that version`,
         );
@@ -167,13 +200,26 @@ export function collectInternalDependencyProblems(manifest, packageDocsByName, p
   return problems;
 }
 
+function requireManifest(packageName, version, packageDoc, packageManifestsByKey, problems) {
+  const manifest = resolvePublishedManifest(packageName, version, packageDoc, packageManifestsByKey);
+  if (!manifest) {
+    if (problems) {
+      problems.push(`${packageName}: npm registry is missing manifest data for ${version}`);
+    }
+    return null;
+  }
+  return manifest;
+}
+
 export function verifyPackageRegistryState({
   packageName,
   packageDoc,
   packageDocsByName,
-  packageManifestsByKey,
+  packageManifestsByKey = new Map(),
+  channel,
   distTag,
   targetVersion,
+  allowCanaryLatest,
 }) {
   const problems = [];
   const distTags = packageDoc["dist-tags"] ?? {};
@@ -185,14 +231,36 @@ export function verifyPackageRegistryState({
     );
   }
 
-  const targetManifest = resolvePublishedManifest(packageName, targetVersion, packageDoc, packageManifestsByKey);
-  if (!targetManifest) {
-    problems.push(`${packageName}: npm registry is missing manifest data for ${targetVersion}`);
-    return problems;
+  const targetManifest = requireManifest(packageName, targetVersion, packageDoc, packageManifestsByKey, problems);
+  if (targetManifest) {
+    for (const problem of collectInternalDependencyProblems(targetManifest, packageDocsByName, packageManifestsByKey)) {
+      problems.push(`${packageName}@${targetVersion}: ${problem}`);
+    }
   }
 
-  for (const problem of collectInternalDependencyProblems(targetManifest, packageDocsByName, packageManifestsByKey)) {
-    problems.push(`${packageName}@${targetVersion}: ${problem}`);
+  if (channel === "canary") {
+    const latestVersion = distTags.latest;
+
+    if (latestVersion && isCanaryVersion(latestVersion) && !allowCanaryLatest) {
+      problems.push(
+        `${packageName}: latest dist-tag still resolves to canary ${latestVersion}; rerun with --allow-canary-latest only when that state is intentional`,
+      );
+    }
+
+    if (latestVersion && isCanaryVersion(latestVersion)) {
+      const latestManifest = requireManifest(
+        packageName,
+        latestVersion,
+        packageDoc,
+        packageManifestsByKey,
+        problems,
+      );
+      if (latestManifest) {
+        for (const problem of collectInternalDependencyProblems(latestManifest, packageDocsByName, packageManifestsByKey)) {
+          problems.push(`${packageName}@${latestVersion} via latest: ${problem}`);
+        }
+      }
+    }
   }
 
   return problems;
@@ -237,33 +305,47 @@ async function main() {
     }),
   );
 
+  const versionsToFetchByPackage = new Map();
+  for (const packageName of packageNames) {
+    const packageDoc = packageDocsByName.get(packageName);
+    const versionsToFetch = new Set([options.targetVersion]);
+    const latestVersion = packageDoc?.["dist-tags"]?.latest;
+    if (latestVersion && isCanaryVersion(latestVersion)) {
+      versionsToFetch.add(latestVersion);
+    }
+    versionsToFetchByPackage.set(packageName, versionsToFetch);
+  }
+
   await Promise.all(
-    packageNames.map(async (packageName) => {
-      packageManifestsByKey.set(
-        createManifestLookupKey(packageName, options.targetVersion),
-        await fetchPackageManifest(packageName, options.targetVersion, { allowMissing: true }),
-      );
-    }),
+    [...versionsToFetchByPackage.entries()].flatMap(([packageName, versionsToFetch]) =>
+      [...versionsToFetch].map(async (version) => {
+        packageManifestsByKey.set(
+          createManifestLookupKey(packageName, version),
+          await fetchPackageManifest(packageName, version, { allowMissing: true }),
+        );
+      }),
+    ),
   );
 
   const dependencyVersionsByKey = new Map();
-  for (const packageName of packageNames) {
-    const manifest = resolvePublishedManifest(
-      packageName,
-      options.targetVersion,
-      packageDocsByName.get(packageName),
-      packageManifestsByKey,
-    );
-
-    if (!manifest) {
-      continue;
-    }
-
-    for (const dependencyVersion of collectInternalDependencyVersions(manifest)) {
-      dependencyVersionsByKey.set(
-        createManifestLookupKey(dependencyVersion.packageName, dependencyVersion.version),
-        dependencyVersion,
+  for (const [packageName, versionsToFetch] of versionsToFetchByPackage.entries()) {
+    for (const version of versionsToFetch) {
+      const manifest = resolvePublishedManifest(
+        packageName,
+        version,
+        packageDocsByName.get(packageName),
+        packageManifestsByKey,
       );
+      if (!manifest) {
+        continue;
+      }
+
+      for (const dependencyVersion of collectInternalDependencyVersions(manifest)) {
+        dependencyVersionsByKey.set(
+          createManifestLookupKey(dependencyVersion.packageName, dependencyVersion.version),
+          dependencyVersion,
+        );
+      }
     }
   }
 
@@ -290,8 +372,10 @@ async function main() {
       packageDoc: packageDocsByName.get(packageName),
       packageDocsByName,
       packageManifestsByKey,
+      channel: options.channel,
       distTag: options.distTag,
       targetVersion: options.targetVersion,
+      allowCanaryLatest: options.allowCanaryLatest,
     });
 
     if (packageProblems.length === 0) {

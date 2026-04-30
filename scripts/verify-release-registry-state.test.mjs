@@ -5,8 +5,14 @@ import {
   collectInternalDependencyProblems,
   createManifestLookupKey,
   fetchRegistryJson,
+  isCanaryVersion,
   verifyPackageRegistryState,
 } from "./verify-release-registry-state.mjs";
+
+test("isCanaryVersion matches release canaries", () => {
+  assert.equal(isCanaryVersion("2026.427.0-canary.3"), true);
+  assert.equal(isCanaryVersion("2026.427.0"), false);
+});
 
 test("collectInternalDependencyProblems flags missing internal versions", () => {
   const manifest = {
@@ -27,7 +33,7 @@ test("collectInternalDependencyProblems flags missing internal versions", () => 
   ]);
 
   assert.deepEqual(
-    collectInternalDependencyProblems(manifest, packageDocsByName, new Map()),
+    collectInternalDependencyProblems(manifest, packageDocsByName),
     ["dependencies requires @paperclipai/plugin-sdk@2026.425.0-canary.5, but npm does not expose that version"],
   );
 });
@@ -66,6 +72,7 @@ test("verifyPackageRegistryState tolerates a stale root versions map when dist-t
       {
         "dist-tags": {
           canary: "2026.430.0-canary.0",
+          latest: "2026.430.0",
         },
         versions: {},
       },
@@ -103,8 +110,102 @@ test("verifyPackageRegistryState tolerates a stale root versions map when dist-t
       packageDoc: packageDocsByName.get("@paperclipai/ui"),
       packageDocsByName,
       packageManifestsByKey,
+      channel: "canary",
       distTag: "canary",
       targetVersion: "2026.430.0-canary.0",
+      allowCanaryLatest: false,
+    }),
+    [],
+  );
+});
+
+test("verifyPackageRegistryState fails when canary latest is left in place by default", () => {
+  const packageDocsByName = new Map([
+    [
+      "@paperclipai/plugin-e2b",
+      {
+        "dist-tags": {
+          latest: "2026.425.0-canary.5",
+          canary: "2026.427.0-canary.3",
+        },
+        versions: {
+          "2026.425.0-canary.5": {
+            dependencies: {
+              "@paperclipai/plugin-sdk": "2026.425.0-canary.5",
+            },
+          },
+          "2026.427.0-canary.3": {
+            dependencies: {
+              "@paperclipai/plugin-sdk": "2026.427.0-canary.3",
+            },
+          },
+        },
+      },
+    ],
+    [
+      "@paperclipai/plugin-sdk",
+      {
+        versions: {
+          "2026.427.0-canary.3": {},
+        },
+      },
+    ],
+  ]);
+
+  assert.deepEqual(
+    verifyPackageRegistryState({
+      packageName: "@paperclipai/plugin-e2b",
+      packageDoc: packageDocsByName.get("@paperclipai/plugin-e2b"),
+      packageDocsByName,
+      channel: "canary",
+      distTag: "canary",
+      targetVersion: "2026.427.0-canary.3",
+      allowCanaryLatest: false,
+    }),
+    [
+      "@paperclipai/plugin-e2b: latest dist-tag still resolves to canary 2026.425.0-canary.5; rerun with --allow-canary-latest only when that state is intentional",
+      "@paperclipai/plugin-e2b@2026.425.0-canary.5 via latest: dependencies requires @paperclipai/plugin-sdk@2026.425.0-canary.5, but npm does not expose that version",
+    ],
+  );
+});
+
+test("verifyPackageRegistryState allows intentional canary latest but still checks dependencies", () => {
+  const packageDocsByName = new Map([
+    [
+      "paperclipai",
+      {
+        "dist-tags": {
+          latest: "2026.427.0-canary.3",
+          canary: "2026.427.0-canary.3",
+        },
+        versions: {
+          "2026.427.0-canary.3": {
+            dependencies: {
+              "@paperclipai/server": "2026.427.0-canary.3",
+            },
+          },
+        },
+      },
+    ],
+    [
+      "@paperclipai/server",
+      {
+        versions: {
+          "2026.427.0-canary.3": {},
+        },
+      },
+    ],
+  ]);
+
+  assert.deepEqual(
+    verifyPackageRegistryState({
+      packageName: "paperclipai",
+      packageDoc: packageDocsByName.get("paperclipai"),
+      packageDocsByName,
+      channel: "canary",
+      distTag: "canary",
+      targetVersion: "2026.427.0-canary.3",
+      allowCanaryLatest: true,
     }),
     [],
   );
@@ -138,8 +239,10 @@ test("verifyPackageRegistryState still fails when the dist-tag is stale", () => 
       packageDoc: packageDocsByName.get("@paperclipai/ui"),
       packageDocsByName,
       packageManifestsByKey,
+      channel: "canary",
       distTag: "canary",
       targetVersion: "2026.430.0-canary.0",
+      allowCanaryLatest: false,
     }),
     ["@paperclipai/ui: dist-tag canary resolves to 2026.429.0-canary.2, expected 2026.430.0-canary.0"],
   );

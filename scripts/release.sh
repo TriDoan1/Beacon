@@ -263,7 +263,7 @@ release_info ""
 if [ "$dry_run" = true ]; then
   release_info "==> Step 6/7: Skipping npm verification in dry-run mode..."
 else
-  release_info "==> Step 6/7: Confirming npm package availability..."
+  release_info "==> Step 6/7: Confirming npm package availability and dist-tag integrity..."
   VERIFY_ATTEMPTS="${NPM_PUBLISH_VERIFY_ATTEMPTS:-12}"
   VERIFY_DELAY_SECONDS="${NPM_PUBLISH_VERIFY_DELAY_SECONDS:-5}"
   REGISTRY_STATE_VERIFY_ATTEMPTS="${NPM_REGISTRY_STATE_VERIFY_ATTEMPTS:-12}"
@@ -289,9 +289,13 @@ else
   release_info "  ✓ Verified all versioned packages are available on npm"
 
   verify_args=(
+    --channel "$channel"
     --dist-tag "$DIST_TAG"
     --target-version "$TARGET_PUBLISH_VERSION"
   )
+  if [ "$allow_canary_latest" = true ]; then
+    verify_args+=(--allow-canary-latest)
+  fi
   while IFS=$'\t' read -r _pkg_dir pkg_name _pkg_version; do
     [ -z "$pkg_name" ] && continue
     verify_args+=(--package "$pkg_name")
