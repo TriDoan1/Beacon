@@ -67,12 +67,14 @@ This is the right state for:
 
 - waiting on another issue
 - waiting on a human decision
-- waiting on an external dependency or system
+- waiting on an external dependency or system when Paperclip does not own a scheduled re-check
 - work that automatic recovery could not safely continue
 
 ### `in_review`
 
 Execution work is paused because the next move belongs to a reviewer or approver, not the current executor.
+
+An external review service can also be a valid review path when the issue keeps an agent assignee and has an active one-shot monitor that will wake that assignee to check the service later.
 
 ### `done`
 
@@ -164,6 +166,7 @@ The valid action-path primitives are:
 - a queued wake or continuation that can be delivered to the responsible agent
 - a typed execution-policy participant, such as `executionState.currentParticipant`
 - a pending issue-thread interaction or linked approval that is waiting for a specific responder
+- a one-shot issue monitor (`executionPolicy.monitor.nextCheckAt`) that will wake the assignee for a future check
 - a human owner via `assigneeUserId`
 - a first-class blocker chain whose unresolved leaf issues are themselves healthy
 - an open explicit recovery issue that names the owner and action needed to restore liveness
@@ -188,6 +191,7 @@ A healthy active-work state means at least one of these is true:
 
 - there is an active run for the issue
 - there is already a queued continuation wake
+- there is an active one-shot monitor that will wake the assignee for a future check
 - there is an open explicit recovery issue for the lost execution path
 
 An agent-owned `in_progress` issue is stalled when it has no active run, no queued continuation, and no explicit recovery surface. A still-running but silent process is not automatically stalled; it is handled by the active-run watchdog contract.
@@ -202,11 +206,29 @@ A healthy `in_review` issue has at least one valid action path:
 - a pending issue-thread interaction or linked approval waiting for a named responder
 - a human owner via `assigneeUserId`
 - an active run or queued wake that is expected to process the review state
+- an active one-shot monitor for an external service or async review loop that the assignee owns
 - an open explicit recovery issue for an ambiguous review handoff
 
 Agent-assigned `in_review` with no typed participant is only healthy when one of the other paths exists. Assignment to the same agent that produced the handoff is not, by itself, a review path.
 
-An `in_review` issue is stalled when it has no typed participant, no pending interaction or approval, no user owner, no active run, no queued wake, and no explicit recovery issue. Paperclip should surface that state as recovery work rather than silently completing the issue or leaving blocker chains parked indefinitely.
+An `in_review` issue is stalled when it has no typed participant, no pending interaction or approval, no user owner, no active monitor, no active run, no queued wake, and no explicit recovery issue. Paperclip should surface that state as recovery work rather than silently completing the issue or leaving blocker chains parked indefinitely.
+
+### Issue monitors
+
+An issue monitor is a one-shot deferred action path for agent-owned issues in `in_progress` or `in_review`.
+
+Use a monitor when the current assignee owns a future check against an async system or external service. Examples include Greptile review loops, GitHub checks, Vercel deployments, or provider jobs where the agent should come back later and decide what happens next.
+
+Monitor policy lives under `executionPolicy.monitor` and includes:
+
+- `nextCheckAt`: when Paperclip should wake the assignee
+- `notes`: what the assignee should check
+- `serviceName` and `externalRef`: optional structured external-service context
+- `timeoutAt`, `maxAttempts`, and `recoveryPolicy`: optional recovery hints for bounded waits
+
+Monitors are not recurring intervals. When a monitor fires, Paperclip clears the scheduled monitor and queues an `issue_monitor_due` wake for the assignee. If the external service is still pending, the assignee must explicitly re-arm the monitor with a new `nextCheckAt`. If the issue moves to `done`, `cancelled`, an invalid status, or a human/unassigned owner, the monitor is cleared.
+
+Use `blocked` instead of a monitor when no Paperclip assignee owns a responsible polling path. In that case, name the external owner/action or create first-class recovery/blocker work.
 
 ### `blocked`
 
