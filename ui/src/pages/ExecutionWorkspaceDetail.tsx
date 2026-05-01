@@ -394,8 +394,10 @@ function ExecutionWorkspaceRoutinesList({
   });
 
   const workspaceRoutines = useMemo(
-    () => (routines ?? []).filter(routineHasWorkspaceSpecificVariables),
-    [routines],
+    () => (routines ?? [])
+      .filter((routine) => routine.projectId === workspace.projectId)
+      .filter(routineHasWorkspaceSpecificVariables),
+    [routines, workspace.projectId],
   );
 
   const runRoutine = useMutation({

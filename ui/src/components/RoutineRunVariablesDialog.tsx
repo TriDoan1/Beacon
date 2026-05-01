@@ -3,6 +3,7 @@ import {
   WORKSPACE_BRANCH_ROUTINE_VARIABLE,
   type Agent,
   type ExecutionWorkspace,
+  type ExecutionWorkspaceMode,
   type IssueExecutionWorkspaceSettings,
   type Project,
   type RoutineVariable,
@@ -57,7 +58,7 @@ function defaultProjectWorkspaceIdForProject(project: Project | null | undefined
     ?? null;
 }
 
-function defaultExecutionWorkspaceModeForProject(project: Project | null | undefined) {
+function defaultExecutionWorkspaceModeForProject(project: Project | null | undefined): ExecutionWorkspaceMode {
   const defaultMode = project?.executionWorkspacePolicy?.enabled ? project.executionWorkspacePolicy.defaultMode : null;
   if (
     defaultMode === "isolated_workspace" ||
@@ -69,23 +70,44 @@ function defaultExecutionWorkspaceModeForProject(project: Project | null | undef
   return "shared_workspace";
 }
 
-function issueModeForExistingWorkspace(mode: string | null | undefined) {
+function issueModeForExistingWorkspace(mode: string | null | undefined): ExecutionWorkspaceMode {
   if (mode === "isolated_workspace" || mode === "operator_branch" || mode === "shared_workspace") return mode;
   if (mode === "adapter_managed" || mode === "cloud_sandbox") return "agent_default";
   return "shared_workspace";
 }
 
+function issueWorkspacePreferenceFromDraft(value: unknown, fallback: ExecutionWorkspaceMode): ExecutionWorkspaceMode {
+  if (
+    value === "inherit" ||
+    value === "shared_workspace" ||
+    value === "isolated_workspace" ||
+    value === "operator_branch" ||
+    value === "reuse_existing" ||
+    value === "agent_default"
+  ) {
+    return value;
+  }
+  return fallback;
+}
+
+type RoutineRunWorkspaceConfig = {
+  executionWorkspaceId: string | null;
+  executionWorkspacePreference: ExecutionWorkspaceMode;
+  executionWorkspaceSettings: IssueExecutionWorkspaceSettings;
+  projectWorkspaceId: string | null;
+};
+
 function buildInitialWorkspaceConfig(
   project: Project | null | undefined,
   defaultExecutionWorkspace?: ExecutionWorkspace | null,
-) {
+): RoutineRunWorkspaceConfig {
   if (defaultExecutionWorkspace && defaultExecutionWorkspace.projectId === project?.id) {
     return {
       executionWorkspaceId: defaultExecutionWorkspace.id,
       executionWorkspacePreference: "reuse_existing",
       executionWorkspaceSettings: {
         mode: issueModeForExistingWorkspace(defaultExecutionWorkspace.mode),
-      } as IssueExecutionWorkspaceSettings,
+      },
       projectWorkspaceId: defaultExecutionWorkspace.projectWorkspaceId ?? defaultProjectWorkspaceIdForProject(project),
     };
   }
@@ -94,14 +116,14 @@ function buildInitialWorkspaceConfig(
   return {
     executionWorkspaceId: null as string | null,
     executionWorkspacePreference: defaultMode,
-    executionWorkspaceSettings: { mode: defaultMode } as IssueExecutionWorkspaceSettings,
+    executionWorkspaceSettings: { mode: defaultMode },
     projectWorkspaceId: defaultProjectWorkspaceIdForProject(project),
   };
 }
 
 function workspaceConfigEquals(
-  a: ReturnType<typeof buildInitialWorkspaceConfig>,
-  b: ReturnType<typeof buildInitialWorkspaceConfig>,
+  a: RoutineRunWorkspaceConfig,
+  b: RoutineRunWorkspaceConfig,
 ) {
   return a.executionWorkspaceId === b.executionWorkspaceId
     && a.executionWorkspacePreference === b.executionWorkspacePreference
@@ -110,15 +132,16 @@ function workspaceConfigEquals(
 }
 
 function applyWorkspaceDraft(
-  current: ReturnType<typeof buildInitialWorkspaceConfig>,
+  current: RoutineRunWorkspaceConfig,
   data: Record<string, unknown>,
 ) {
   const next = {
     ...current,
     executionWorkspaceId: (data.executionWorkspaceId as string | null | undefined) ?? null,
-    executionWorkspacePreference:
-      (data.executionWorkspacePreference as string | null | undefined)
-      ?? current.executionWorkspacePreference,
+    executionWorkspacePreference: issueWorkspacePreferenceFromDraft(
+      data.executionWorkspacePreference,
+      current.executionWorkspacePreference,
+    ),
     executionWorkspaceSettings:
       (data.executionWorkspaceSettings as IssueExecutionWorkspaceSettings | null | undefined)
       ?? current.executionWorkspaceSettings,
