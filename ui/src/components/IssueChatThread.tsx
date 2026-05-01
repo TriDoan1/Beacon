@@ -36,6 +36,7 @@ import type {
   IssueAttachment,
   IssueBlockerAttention,
   IssueRelationIssueSummary,
+  SuccessfulRunHandoffState,
 } from "@paperclipai/shared";
 import type { ActiveRunForIssue, LiveRunForIssue } from "../api/heartbeats";
 import { useLiveRunTranscripts } from "./transcript/useLiveRunTranscripts";
@@ -93,6 +94,7 @@ import { formatAssigneeUserLabel } from "../lib/assignees";
 import { useOptionalToastActions } from "../context/ToastContext";
 import type { CompanyUserProfile } from "../lib/company-members";
 import { timeAgo } from "../lib/timeAgo";
+import { isSuccessfulRunHandoffComment } from "../lib/successful-run-handoff";
 import {
   describeToolInput,
   displayToolName,
@@ -264,6 +266,7 @@ interface IssueChatThreadProps {
   activeRun?: ActiveRunForIssue | null;
   blockedBy?: IssueRelationIssueSummary[];
   blockerAttention?: IssueBlockerAttention | null;
+  successfulRunHandoff?: SuccessfulRunHandoffState | null;
   companyId?: string | null;
   projectId?: string | null;
   issueStatus?: string;
@@ -583,6 +586,9 @@ function commentDateLabel(date: Date | string | undefined): string {
 
 const IssueChatTextPart = memo(function IssueChatTextPart({ text, recessed }: { text: string; recessed?: boolean }) {
   const { onImageClick } = useContext(IssueChatCtx);
+  if (isSuccessfulRunHandoffComment(text)) {
+    return <SuccessfulRunHandoffCommentCallout text={text} recessed={recessed} onImageClick={onImageClick} />;
+  }
   return (
     <MarkdownBody
       className="text-sm leading-6"
@@ -594,6 +600,41 @@ const IssueChatTextPart = memo(function IssueChatTextPart({ text, recessed }: { 
     </MarkdownBody>
   );
 });
+
+export function SuccessfulRunHandoffCommentCallout({
+  text,
+  recessed,
+  onImageClick,
+}: {
+  text: string;
+  recessed?: boolean;
+  onImageClick?: (src: string) => void;
+}) {
+  const escalated = /^##\s+Run finished without a next step/i.test(text.trim());
+  return (
+    <div
+      className={cn(
+        "rounded-md border px-3 py-2.5 text-sm shadow-sm",
+        escalated
+          ? "border-red-500/35 bg-red-500/10 text-red-950 dark:text-red-100"
+          : "border-amber-300/70 bg-amber-50/90 text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
+      )}
+      style={recessed ? { opacity: 0.55 } : undefined}
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle
+          className={cn(
+            "mt-1 h-4 w-4 shrink-0",
+            escalated ? "text-red-600 dark:text-red-300" : "text-amber-600 dark:text-amber-300",
+          )}
+        />
+        <MarkdownBody className="min-w-0 text-sm leading-6" softBreaks onImageClick={onImageClick}>
+          {text}
+        </MarkdownBody>
+      </div>
+    </div>
+  );
+}
 
 function humanizeValue(value: string | null) {
   if (!value) return "None";
@@ -3077,6 +3118,7 @@ export function IssueChatThread({
   activeRun = null,
   blockedBy = [],
   blockerAttention = null,
+  successfulRunHandoff = null,
   companyId,
   projectId,
   issueStatus,
@@ -3700,6 +3742,12 @@ export function IssueChatThread({
                     issueStatus={issueStatus}
                     blockers={unresolvedBlockers}
                     blockerAttention={blockerAttention}
+                    successfulRunHandoff={successfulRunHandoff}
+                    agentName={
+                      successfulRunHandoff?.assigneeAgentId
+                        ? agentMap?.get(successfulRunHandoff.assigneeAgentId)?.name ?? null
+                        : null
+                    }
                   />
                   <IssueAssigneePausedNotice agent={assignedAgent} />
                 </div>

@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { issueExecutionDecisions } from "@paperclipai/db";
+import { activityLog, issueExecutionDecisions } from "@paperclipai/db";
 import {
   addIssueCommentSchema,
   acceptIssueThreadInteractionSchema,
@@ -31,6 +32,7 @@ import {
   getClosedIsolatedExecutionWorkspaceMessage,
   isClosedIsolatedExecutionWorkspace,
   type ExecutionWorkspace,
+  type SuccessfulRunHandoffState,
 } from "@paperclipai/shared";
 import { trackAgentTaskCompleted } from "@paperclipai/shared/telemetry";
 import { getTelemetryClient } from "../telemetry.js";
@@ -112,6 +114,95 @@ type ExecutionStageWakeContext = {
   lastDecisionOutcome: ParsedExecutionState["lastDecisionOutcome"];
   allowedActions: string[];
 };
+
+const SUCCESSFUL_RUN_HANDOFF_ACTIONS = [
+  "issue.successful_run_handoff_required",
+  "issue.successful_run_handoff_resolved",
+  "issue.successful_run_handoff_escalated",
+] as const;
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function successfulRunHandoffStateFromActivity(row: {
+  action: string;
+  agentId: string | null;
+  runId: string | null;
+  details: Record<string, unknown> | null;
+  createdAt: Date;
+}): SuccessfulRunHandoffState | null {
+  const details = row.details ?? {};
+  const state =
+    row.action === "issue.successful_run_handoff_required"
+      ? "required"
+      : row.action === "issue.successful_run_handoff_resolved"
+        ? "resolved"
+        : row.action === "issue.successful_run_handoff_escalated"
+          ? "escalated"
+          : null;
+  if (!state) return null;
+
+  return {
+    state,
+    required: state === "required",
+    sourceRunId:
+      readNonEmptyString(details.sourceRunId)
+      ?? readNonEmptyString(details.source_run_id)
+      ?? readNonEmptyString(details.resumeFromRunId)
+      ?? row.runId
+      ?? null,
+    correctiveRunId:
+      readNonEmptyString(details.correctiveRunId)
+      ?? readNonEmptyString(details.corrective_run_id)
+      ?? (state !== "required" ? row.runId : null),
+    assigneeAgentId:
+      readNonEmptyString(details.assigneeAgentId)
+      ?? readNonEmptyString(details.agentId)
+      ?? row.agentId
+      ?? null,
+    detectedProgressSummary:
+      readNonEmptyString(details.detectedProgressSummary)
+      ?? readNonEmptyString(details.detected_progress_summary)
+      ?? null,
+    createdAt: row.createdAt,
+  };
+}
+
+async function listSuccessfulRunHandoffStates(
+  db: Db,
+  companyId: string,
+  issueIds: string[],
+): Promise<Map<string, SuccessfulRunHandoffState>> {
+  if (issueIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      entityId: activityLog.entityId,
+      action: activityLog.action,
+      agentId: activityLog.agentId,
+      runId: activityLog.runId,
+      details: activityLog.details,
+      createdAt: activityLog.createdAt,
+    })
+    .from(activityLog)
+    .where(
+      and(
+        eq(activityLog.companyId, companyId),
+        eq(activityLog.entityType, "issue"),
+        inArray(activityLog.entityId, issueIds),
+        inArray(activityLog.action, [...SUCCESSFUL_RUN_HANDOFF_ACTIONS]),
+      ),
+    )
+    .orderBy(desc(activityLog.createdAt));
+
+  const states = new Map<string, SuccessfulRunHandoffState>();
+  for (const row of rows) {
+    if (states.has(row.entityId)) continue;
+    const state = successfulRunHandoffStateFromActivity(row);
+    if (state) states.set(row.entityId, state);
+  }
+  return states;
+}
 
 function executionPrincipalsEqual(
   left: ParsedExecutionState["currentParticipant"] | null,
@@ -1028,7 +1119,15 @@ export function issueRoutes(
       limit,
       offset,
     });
-    res.json(result);
+    const handoffStates = await listSuccessfulRunHandoffStates(
+      db,
+      companyId,
+      result.map((issue) => issue.id),
+    );
+    res.json(result.map((issue) => ({
+      ...issue,
+      successfulRunHandoff: handoffStates.get(issue.id) ?? null,
+    })));
   });
 
   router.get("/companies/:companyId/labels", async (req, res) => {
@@ -1216,6 +1315,7 @@ export function issueRoutes(
       blockerAttention,
       productivityReview,
       referenceSummary,
+      successfulRunHandoffStates,
     ] = await Promise.all([
       resolveIssueProjectAndGoal(issue),
       svc.getAncestors(issue.id),
@@ -1225,6 +1325,7 @@ export function issueRoutes(
       svc.listBlockerAttention(issue.companyId, [issue]).then((map) => map.get(issue.id) ?? null),
       svc.listProductivityReviews(issue.companyId, [issue.id]).then((map) => map.get(issue.id) ?? null),
       issueReferencesSvc.listIssueReferenceSummary(issue.id),
+      listSuccessfulRunHandoffStates(db, issue.companyId, [issue.id]),
     ]);
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
@@ -1239,6 +1340,7 @@ export function issueRoutes(
       ancestors,
       ...(blockerAttention ? { blockerAttention } : {}),
       productivityReview,
+      successfulRunHandoff: successfulRunHandoffStates.get(issue.id) ?? null,
       blockedBy: relations.blockedBy,
       blocks: relations.blocks,
       relatedWork: referenceSummary,

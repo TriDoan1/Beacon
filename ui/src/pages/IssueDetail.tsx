@@ -104,8 +104,10 @@ import { buildIssuePropertiesPanelKey } from "../lib/issue-properties-panel-key"
 import { shouldRenderRichSubIssuesSection } from "../lib/issue-detail-subissues";
 import { filterIssueDescendants } from "../lib/issue-tree";
 import { buildSubIssueDefaultsForViewer } from "../lib/subIssueDefaults";
+import { SUCCESSFUL_RUN_HANDOFF_ESCALATED_ACTION, SUCCESSFUL_RUN_HANDOFF_REQUIRED_ACTION } from "../lib/successful-run-handoff";
 import {
   Activity as ActivityIcon,
+  AlertTriangle,
   Archive,
   ArrowLeft,
   Check,
@@ -160,6 +162,25 @@ const FEEDBACK_TERMS_URL = import.meta.env.VITE_FEEDBACK_TERMS_URL?.trim() || "h
 const ISSUE_COMMENT_PAGE_SIZE = 50;
 const ISSUE_COMMENT_AUTOLOAD_LIMIT = ISSUE_COMMENT_PAGE_SIZE * 3;
 const JUMP_TO_LATEST_MAX_COMMENT_PAGES = 10;
+function issueActivityEventTone(action: string) {
+  if (action === SUCCESSFUL_RUN_HANDOFF_ESCALATED_ACTION) {
+    return {
+      className: "border-red-500/35 bg-red-500/10 text-red-950 dark:text-red-100",
+      iconClassName: "text-red-600 dark:text-red-300",
+    };
+  }
+  if (action === SUCCESSFUL_RUN_HANDOFF_REQUIRED_ACTION) {
+    return {
+      className: "border-amber-300/70 bg-amber-50/90 text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100",
+      iconClassName: "text-amber-600 dark:text-amber-300",
+    };
+  }
+  return {
+    className: "border-border/60 text-muted-foreground",
+    iconClassName: "text-muted-foreground",
+  };
+}
+
 const TREE_CONTROL_MODE_LABEL: Record<IssueTreeControlMode, string> = {
   pause: "Pause subtree",
   resume: "Resume subtree",
@@ -578,6 +599,7 @@ type IssueDetailChatTabProps = {
   executionRunId: string | null;
   blockedBy: Issue["blockedBy"];
   blockerAttention: Issue["blockerAttention"] | null;
+  successfulRunHandoff: Issue["successfulRunHandoff"] | null;
   comments: IssueDetailComment[];
   locallyQueuedCommentRunIds: ReadonlyMap<string, string>;
   interactions: IssueThreadInteraction[];
@@ -635,6 +657,7 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
   executionRunId,
   blockedBy,
   blockerAttention,
+  successfulRunHandoff,
   comments,
   locallyQueuedCommentRunIds,
   interactions,
@@ -836,6 +859,7 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
         activeRun={resolvedActiveRun}
         blockedBy={blockedBy ?? []}
         blockerAttention={blockerAttention}
+        successfulRunHandoff={successfulRunHandoff}
         companyId={companyId}
         projectId={projectId}
         issueStatus={issueStatus}
@@ -1065,16 +1089,25 @@ function IssueDetailActivityTab({
           agentMap={agentMap}
           hasLiveRuns={hasLiveRuns}
           activityEvents={activity ?? []}
-          renderActivityEvent={(evt) => (
-            <div className="space-y-1.5 rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <ActorIdentity evt={evt} agentMap={agentMap} userProfileMap={userProfileMap} />
-                <span>{formatIssueActivityAction(evt.action, evt.details, { agentMap, userProfileMap, currentUserId })}</span>
-                <span className="ml-auto shrink-0">{relativeTime(evt.createdAt)}</span>
+          renderActivityEvent={(evt) => {
+            const tone = issueActivityEventTone(evt.action);
+            const isHandoffWarning =
+              evt.action === SUCCESSFUL_RUN_HANDOFF_REQUIRED_ACTION
+              || evt.action === SUCCESSFUL_RUN_HANDOFF_ESCALATED_ACTION;
+            return (
+              <div className={cn("space-y-1.5 rounded-lg border px-3 py-2 text-xs", tone.className)}>
+                <div className="flex items-center gap-1.5">
+                  {isHandoffWarning ? (
+                    <AlertTriangle className={cn("h-3.5 w-3.5 shrink-0", tone.iconClassName)} />
+                  ) : null}
+                  <ActorIdentity evt={evt} agentMap={agentMap} userProfileMap={userProfileMap} />
+                  <span>{formatIssueActivityAction(evt.action, evt.details, { agentMap, userProfileMap, currentUserId })}</span>
+                  <span className="ml-auto shrink-0">{relativeTime(evt.createdAt)}</span>
+                </div>
+                <IssueReferenceActivitySummary event={evt} />
               </div>
-              <IssueReferenceActivitySummary event={evt} />
-            </div>
-          )}
+            );
+          }}
         />
       </div>
       {linkedApprovals && linkedApprovals.length > 0 && (
@@ -3662,6 +3695,7 @@ export function IssueDetail() {
               executionRunId={issue.executionRunId ?? null}
               blockedBy={issue.blockedBy ?? []}
               blockerAttention={issue.blockerAttention ?? null}
+              successfulRunHandoff={issue.successfulRunHandoff ?? null}
               comments={threadComments}
               locallyQueuedCommentRunIds={locallyQueuedCommentRunIds}
               interactions={interactions}
