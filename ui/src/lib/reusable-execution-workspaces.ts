@@ -2,11 +2,11 @@ export interface ReusableExecutionWorkspaceLike {
   id: string;
   name: string;
   cwd: string | null;
-  updatedAt: Date | string;
+  lastUsedAt: Date | string;
 }
 
-function workspaceUpdatedTime(workspace: Pick<ReusableExecutionWorkspaceLike, "updatedAt">) {
-  const time = new Date(workspace.updatedAt).getTime();
+function workspaceLastUsedTime(workspace: Pick<ReusableExecutionWorkspaceLike, "lastUsedAt">) {
+  const time = new Date(workspace.lastUsedAt).getTime();
   return Number.isFinite(time) ? time : 0;
 }
 
@@ -27,7 +27,7 @@ export function orderReusableExecutionWorkspaces<T extends ReusableExecutionWork
   for (const workspace of workspaces) {
     const key = workspace.cwd ?? workspace.id;
     const existing = deduplicatedByPath.get(key);
-    if (!existing || workspaceUpdatedTime(workspace) > workspaceUpdatedTime(existing)) {
+    if (!existing || workspaceLastUsedTime(workspace) > workspaceLastUsedTime(existing)) {
       deduplicatedByPath.set(key, workspace);
     }
   }
@@ -35,15 +35,15 @@ export function orderReusableExecutionWorkspaces<T extends ReusableExecutionWork
   const alphabetized = Array.from(deduplicatedByPath.values()).sort(compareWorkspaceNames);
   if (alphabetized.length <= 1) return alphabetized;
 
-  let mostRecentlyUpdated = alphabetized[0]!;
+  let mostRecentlyUsed = alphabetized[0]!;
   for (const workspace of alphabetized.slice(1)) {
-    if (workspaceUpdatedTime(workspace) > workspaceUpdatedTime(mostRecentlyUpdated)) {
-      mostRecentlyUpdated = workspace;
+    if (workspaceLastUsedTime(workspace) > workspaceLastUsedTime(mostRecentlyUsed)) {
+      mostRecentlyUsed = workspace;
     }
   }
 
   return [
-    mostRecentlyUpdated,
-    ...alphabetized.filter((workspace) => workspace.id !== mostRecentlyUpdated.id),
+    mostRecentlyUsed,
+    ...alphabetized.filter((workspace) => workspace.id !== mostRecentlyUsed.id),
   ];
 }
