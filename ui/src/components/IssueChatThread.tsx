@@ -613,8 +613,7 @@ export function SuccessfulRunHandoffCommentCallout({
   recessed?: boolean;
   onImageClick?: (src: string) => void;
 }) {
-  const escalated = isSuccessfulRunHandoffEscalationComment(text)
-    || /^##\s+Run finished without a next step/i.test(text.trim());
+  const escalated = isSuccessfulRunHandoffEscalationComment(text);
   return (
     <div
       className={cn(
