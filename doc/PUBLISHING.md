@@ -198,22 +198,19 @@ After that, trusted publishing can take over.
 Example for `@paperclipai/adapter-acpx-local` from the repo root:
 
 ```bash
-# expected before bootstrap: npm does not know this package yet
-npm view @paperclipai/adapter-acpx-local version
+# safe preview
+pnpm run release:bootstrap-package -- @paperclipai/adapter-acpx-local
 
-# build the publish payload
-pnpm --filter @paperclipai/adapter-acpx-local build
-
-# confirm local npm auth
-npm whoami
-
-# preview the exact tarball contents
-cd packages/adapters/acpx-local
-npm pack --dry-run
-
-# one-time bootstrap publish
-npm publish --access public
+# one-time first publish from an authenticated maintainer machine
+pnpm run release:bootstrap-package -- @paperclipai/adapter-acpx-local --publish
 ```
+
+The helper script:
+
+- checks that the package does not already exist on npm
+- builds the target package unless `--skip-build` is passed
+- runs `npm pack --dry-run` in the package directory
+- only runs the real `npm publish --access public` when `--publish` is provided
 
 After that first publish succeeds:
 
