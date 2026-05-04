@@ -17,7 +17,7 @@ function usage() {
   process.stderr.write(
     [
       "Usage:",
-      "  node scripts/bootstrap-npm-package.mjs <package-name-or-dir> [--publish] [--skip-build]",
+      "  node scripts/bootstrap-npm-package.mjs <package-name-or-dir> [--publish --otp <code>] [--skip-build]",
       "",
       "Examples:",
       "  node scripts/bootstrap-npm-package.mjs @paperclipai/adapter-acpx-local",
@@ -233,6 +233,10 @@ function main(argv) {
   const pkg = resolveTargetPackage(selector);
   process.stdout.write(`Selected ${pkg.name} (${pkg.dir})\n`);
 
+  if (publish && !otp) {
+    throw new Error("`--publish` requires `--otp <code>`. Generate a fresh npm one-time password and rerun.");
+  }
+
   const npmState = inspectNpmPackage(pkg.name);
   if (npmState.exists) {
     throw new Error(`${pkg.name} already exists on npm at version ${npmState.version}; bootstrap is only for first publish`);
@@ -257,8 +261,8 @@ function main(argv) {
     process.stdout.write(
       [
         "",
-        `Dry run complete. To perform the first publish from an authenticated maintainer machine, run:`,
-        `node scripts/bootstrap-npm-package.mjs ${pkg.name} --publish`,
+        "Dry run complete. To perform the first publish from an authenticated maintainer machine, run:",
+        `node scripts/bootstrap-npm-package.mjs ${pkg.name} --publish --otp <code>`,
         "",
       ].join("\n"),
     );
