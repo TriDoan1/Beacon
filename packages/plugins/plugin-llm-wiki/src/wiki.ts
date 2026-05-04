@@ -177,6 +177,11 @@ type PaperclipSourceBundle = {
   warnings: string[];
 };
 
+type PaperclipBundleIssueList = {
+  issues: Issue[];
+  warnings: string[];
+};
+
 type PaperclipDistillationRunInput = PaperclipSourceBundleInput;
 
 type PaperclipDistillationOutcomeInput = {
@@ -1409,7 +1414,7 @@ function issueInBackfillWindow(issue: Issue, input: Pick<PaperclipSourceBundleIn
   return true;
 }
 
-async function listPaperclipBundleIssues(ctx: PluginContext, input: PaperclipSourceBundleInput): Promise<Issue[]> {
+async function listPaperclipBundleIssues(ctx: PluginContext, input: PaperclipSourceBundleInput): Promise<PaperclipBundleIssueList> {
   const filterAndSort = (issues: Issue[]) =>
     issues
       .filter((issue) => !isLlmWikiOperationIssue(issue))
@@ -1423,7 +1428,7 @@ async function listPaperclipBundleIssues(ctx: PluginContext, input: PaperclipSou
       includeDocuments: true,
       includeAssignees: true,
     });
-    return filterAndSort(subtree.issues);
+    return { issues: filterAndSort(subtree.issues), warnings: [] };
   }
 
   const issues = await ctx.issues.list({
@@ -1432,7 +1437,10 @@ async function listPaperclipBundleIssues(ctx: PluginContext, input: PaperclipSou
     includePluginOperations: false,
     limit: 500,
   });
-  return filterAndSort(issues);
+  const warnings = issues.length >= 500
+    ? ["Source bundle may be truncated: fetched the 500 issue limit for this scope; narrow the scope or use a backfill window if older issues are missing."]
+    : [];
+  return { issues: filterAndSort(issues), warnings };
 }
 
 export async function assemblePaperclipSourceBundle(ctx: PluginContext, input: PaperclipSourceBundleInput): Promise<PaperclipSourceBundle> {
@@ -1442,10 +1450,11 @@ export async function assemblePaperclipSourceBundle(ctx: PluginContext, input: P
   const perSourceLimit = limits.maxCharactersPerSource;
   const includeComments = input.includeComments !== false;
   const includeDocuments = input.includeDocuments !== false;
-  const issues = await listPaperclipBundleIssues(ctx, input);
+  const issueList = await listPaperclipBundleIssues(ctx, input);
+  const issues = issueList.issues;
   const scope = paperclipCursorScopeMetadata(input);
   const sourceRefs: PaperclipSourceRef[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = [...issueList.warnings];
   const lines = [
     `# Paperclip source bundle`,
     "",
@@ -2122,7 +2131,7 @@ export async function distillPaperclipProjectPage(ctx: PluginContext, input: Pap
   }
   const wikiId = normalizeWikiId(input.wikiId);
   const scope = paperclipCursorScopeMetadata(input);
-  const issues = await listPaperclipBundleIssues(ctx, input);
+  const { issues } = await listPaperclipBundleIssues(ctx, input);
   const project = scope.projectId ? await ctx.projects.get(scope.projectId, input.companyId) : null;
   const rootIssue = scope.rootIssueId ? await ctx.issues.get(scope.rootIssueId, input.companyId) : null;
   const slug = projectPageSlug({ project, rootIssue });
@@ -2278,27 +2287,51 @@ export async function distillPaperclipProjectPage(ctx: PluginContext, input: Pap
   }
 
   const appliedPages: string[] = [];
-  for (const patch of patches) {
-    await writeWikiPage(ctx, {
-      companyId: input.companyId,
-      wikiId,
-      path: patch.pagePath,
-      contents: patch.proposedContents,
-      expectedHash: patch.currentHash,
-      summary: `Paperclip distillation ${patch.operationType} from ${bundle.sourceHash}`,
-      sourceRefs: patch.sourceRefs,
-    });
-    await upsertPageBinding(ctx, {
-      companyId: input.companyId,
-      wikiId,
-      projectId: scope.projectId,
-      rootIssueId: scope.rootIssueId,
-      pagePath: patch.pagePath,
-      sourceHash: bundle.sourceHash,
-      runId: run.runId,
-      metadata: { operationType: patch.operationType },
-    });
-    appliedPages.push(patch.pagePath);
+  try {
+    for (const patch of patches) {
+      const latest = await readCurrentWithHash(ctx, input.companyId, patch.pagePath);
+      assertExpectedHash(patch.currentHash, latest.hash, patch.pagePath);
+    }
+
+    for (const patch of patches) {
+      await writeWikiPage(ctx, {
+        companyId: input.companyId,
+        wikiId,
+        path: patch.pagePath,
+        contents: patch.proposedContents,
+        expectedHash: patch.currentHash,
+        summary: `Paperclip distillation ${patch.operationType} from ${bundle.sourceHash}`,
+        sourceRefs: patch.sourceRefs,
+      });
+      await upsertPageBinding(ctx, {
+        companyId: input.companyId,
+        wikiId,
+        projectId: scope.projectId,
+        rootIssueId: scope.rootIssueId,
+        pagePath: patch.pagePath,
+        sourceHash: bundle.sourceHash,
+        runId: run.runId,
+        metadata: { operationType: patch.operationType },
+      });
+      appliedPages.push(patch.pagePath);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      await recordPaperclipDistillationOutcome(ctx, {
+        companyId: input.companyId,
+        wikiId,
+        runId: run.runId,
+        cursorId: run.cursorId,
+        status: "failed",
+        sourceHash: bundle.sourceHash,
+        sourceWindowEnd: bundle.sourceWindowEnd,
+        warning: `Auto-apply failed after ${appliedPages.length} page(s): ${message}`,
+      });
+    } catch {
+      // Preserve the original write failure for the caller.
+    }
+    throw error;
   }
   await recordPaperclipDistillationOutcome(ctx, {
     companyId: input.companyId,

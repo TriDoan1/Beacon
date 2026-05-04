@@ -1287,6 +1287,37 @@ Route sidebar state stays attached to the selected wiki page.
     expect(first.sourceWindowEnd).toEqual(expect.any(String));
   });
 
+  it("warns when Paperclip source listing reaches the scoped issue limit", async () => {
+    const harness = createTestHarness({ manifest });
+    const project = existingProject();
+    const issues = Array.from({ length: 500 }, (_, index) => paperclipIssue({
+      id: `88888888-8888-4888-8888-${String(index).padStart(12, "0")}`,
+      identifier: `PAP-${5000 + index}`,
+      issueNumber: 5000 + index,
+      title: `Bounded source issue ${index}`,
+      description: "Completed implementation note for project wiki distillation.",
+      status: "done",
+      projectId: project.id,
+      updatedAt: new Date(`2026-05-${String((index % 28) + 1).padStart(2, "0")}T10:00:00Z`),
+    }));
+    harness.seed({ projects: [project], issues });
+
+    await plugin.definition.setup(harness.ctx);
+    const bundle = await harness.performAction<{
+      markdown: string;
+      warnings: string[];
+    }>("assemble-paperclip-source-bundle", {
+      companyId: COMPANY_ID,
+      projectId: project.id,
+      maxCharacters: 400000,
+    });
+
+    expect(bundle.markdown).toContain("- Issue count: 500");
+    expect(bundle.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("500 issue limit"),
+    ]));
+  });
+
   it("suppresses secret-like comment and document bodies before storing distillation snapshots", async () => {
     const harness = createTestHarness({ manifest });
     const issue = paperclipIssue({
@@ -1811,6 +1842,59 @@ Route sidebar state stays attached to the selected wiki page.
       "wiki/projects/existing-wiki-project.md",
       result.patches[0].sourceHash,
     ]));
+  });
+
+  it("records failed distillation outcomes when auto-apply writes partially fail", async () => {
+    const harness = createTestHarness({ manifest, config: { autoApplyIngestPatches: true } });
+    const project = existingProject();
+    const issue = paperclipIssue({
+      id: "77777777-7777-4777-8777-77777777779b",
+      identifier: "PAP-4105",
+      title: "Publish project page with shared index",
+      description: "Implementation completed enough to publish the generated project page.",
+      status: "done",
+      projectId: project.id,
+      updatedAt: new Date("2026-05-04T10:00:00Z"),
+    });
+    const files = new Map<string, string>([
+      ["wiki/index.md", DEFAULT_INDEX],
+      ["wiki/log.md", DEFAULT_LOG],
+    ]);
+    const writes: string[] = [];
+    harness.seed({ projects: [project], issues: [issue] });
+    harness.ctx.localFolders.readText = async (_companyId, _folderKey, relativePath) => {
+      const contents = files.get(relativePath);
+      if (contents == null) throw new Error(`missing ${relativePath}`);
+      return contents;
+    };
+    harness.ctx.localFolders.writeTextAtomic = async (_companyId, _folderKey, relativePath, contents) => {
+      writes.push(relativePath);
+      if (relativePath === "wiki/index.md") {
+        throw new Error("simulated index write conflict");
+      }
+      files.set(relativePath, contents);
+      return harness.ctx.localFolders.status(COMPANY_ID, "wiki-root");
+    };
+
+    await plugin.definition.setup(harness.ctx);
+    await expect(harness.performAction("distill-paperclip-project-page", {
+      companyId: COMPANY_ID,
+      projectId: project.id,
+      autoApply: true,
+      maxCharacters: 20000,
+      includeSupportingPages: false,
+    })).rejects.toThrow("simulated index write conflict");
+
+    expect(writes).toEqual([
+      "wiki/projects/existing-wiki-project.md",
+      "wiki/index.md",
+    ]);
+    const failedOutcome = harness.dbExecutes.find((execute) =>
+      execute.sql.trim().startsWith("UPDATE")
+      && execute.sql.includes("paperclip_distillation_runs")
+      && execute.params?.[3] === "failed");
+    expect(failedOutcome?.params?.[4]).toContain("Auto-apply failed after 1 page(s)");
+    expect(failedOutcome?.params?.[4]).toContain("simulated index write conflict");
   });
 
   it("refuses auto-apply Paperclip project page patches in authenticated/public deployments", async () => {
