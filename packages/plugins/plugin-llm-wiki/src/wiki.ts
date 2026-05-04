@@ -1745,6 +1745,7 @@ export async function createPaperclipDistillationWorkItem(ctx: PluginContext, in
   const wikiId = normalizeWikiId(input.wikiId);
   const itemId = randomUUID();
   const scope = paperclipCursorScopeMetadata(input);
+  const idempotencyKey = input.idempotencyKey ?? `${input.kind}:${scope.sourceScope}:${scope.scopeKey}`;
   if (input.kind === "backfill" && !scope.projectId && !scope.rootIssueId) {
     throw new Error("Backfill work items must target a projectId or rootIssueId; whole-company backfill is not allowed.");
   }
@@ -1765,7 +1766,7 @@ export async function createPaperclipDistillationWorkItem(ctx: PluginContext, in
       scope.projectId,
       scope.rootIssueId,
       input.requestedByIssueId ?? null,
-      input.idempotencyKey ?? null,
+      idempotencyKey,
       jsonParam({
         sourceScope: scope.sourceScope,
         ...(input.metadata ?? {}),

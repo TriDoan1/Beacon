@@ -1434,13 +1434,19 @@ Route sidebar state stays attached to the selected wiki page.
       metadata: { window: "last-30-days" },
       idempotencyKey: "backfill:last-30-days",
     });
+    await harness.performAction("create-paperclip-distillation-work-item", {
+      companyId: COMPANY_ID,
+      kind: "manual",
+      projectId: "77777777-7777-4777-8777-777777777780",
+    });
 
     const workItemWrites = harness.dbExecutes.filter((execute) => execute.sql.includes("paperclip_distillation_work_items"));
-    expect(workItemWrites).toHaveLength(3);
-    expect(workItemWrites.map((write) => write.params?.[3])).toEqual(["manual", "retry", "backfill"]);
+    expect(workItemWrites).toHaveLength(4);
+    expect(workItemWrites.map((write) => write.params?.[3])).toEqual(["manual", "retry", "backfill", "manual"]);
     expect(String(workItemWrites[0].params?.[9])).toContain('"sourceScope":"project"');
     expect(String(workItemWrites[1].params?.[9])).toContain('"sourceScope":"root_issue"');
     expect(String(workItemWrites[2].params?.[9])).toContain('"sourceScope":"project"');
+    expect(workItemWrites[3].params?.[8]).toBe("manual:project:77777777-7777-4777-8777-777777777780");
 
     await expect(harness.performAction("create-paperclip-distillation-work-item", {
       companyId: COMPANY_ID,
@@ -1939,6 +1945,7 @@ Route sidebar state stays attached to the selected wiki page.
       "raw/.gitkeep",
       "wiki/sources/.gitkeep",
       "wiki/projects/.gitkeep",
+      "wiki/areas/.gitkeep",
       "wiki/entities/.gitkeep",
       "wiki/concepts/.gitkeep",
       "wiki/synthesis/.gitkeep",
