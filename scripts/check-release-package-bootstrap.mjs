@@ -39,7 +39,84 @@ function inspectNpmPackage(packageName) {
   };
 }
 
-function collectReleasePackagesForChangedPaths(changedPaths, releasePackages = buildReleasePackagePlan()) {
+function readGitFileAtRevision(revision, filePath) {
+  const result = spawnSync("git", ["show", `${revision}:${normalizePath(filePath)}`], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status === 0) {
+    return result.stdout;
+  }
+
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+
+  if (
+    /exists on disk, but not in/i.test(output) ||
+    /does not exist in/i.test(output)
+  ) {
+    return null;
+  }
+
+  throw new Error(`failed to read ${filePath} at ${revision}:\n${output || "git show failed"}`);
+}
+
+function getBaseReleaseState(
+  revision,
+  releasePackages = buildReleasePackagePlan(),
+  readFileAtRevision = readGitFileAtRevision,
+) {
+  if (!revision) return null;
+
+  const manifestText = readFileAtRevision(revision, "scripts/release-package-manifest.json");
+
+  if (manifestText) {
+    const manifestEntries = JSON.parse(manifestText);
+
+    if (!Array.isArray(manifestEntries)) {
+      throw new Error(`expected scripts/release-package-manifest.json at ${revision} to contain an array`);
+    }
+
+    return {
+      source: "manifest",
+      byDir: new Map(
+        manifestEntries
+          .filter((entry) => entry?.publishFromCi === true && typeof entry.dir === "string" && typeof entry.name === "string")
+          .map((entry) => [entry.dir, { name: entry.name, publishFromCi: true }]),
+      ),
+    };
+  }
+
+  const byDir = new Map();
+
+  for (const pkg of releasePackages) {
+    const packageJsonText = readFileAtRevision(revision, `${pkg.dir}/package.json`);
+    if (!packageJsonText) continue;
+
+    const basePackage = JSON.parse(packageJsonText);
+    if (basePackage.private) continue;
+
+    byDir.set(pkg.dir, {
+      name: basePackage.name,
+      publishFromCi: true,
+    });
+  }
+
+  return {
+    source: "public-packages",
+    byDir,
+  };
+}
+
+function collectReleasePackagesForChangedPaths(
+  changedPaths,
+  releasePackages = buildReleasePackagePlan(),
+  baseReleaseState = null,
+) {
   const normalizedChangedPaths = changedPaths.map(normalizePath);
   const manifestFileChanged = normalizedChangedPaths.includes("scripts/release-package-manifest.json");
   const changedReleasePackages = [];
@@ -48,7 +125,12 @@ function collectReleasePackagesForChangedPaths(changedPaths, releasePackages = b
   for (const pkg of releasePackages) {
     if (!pkg.publishFromCi) continue;
     const packageJsonPath = `${pkg.dir}/package.json`;
-    const isRelevant = manifestFileChanged || normalizedChangedPaths.includes(packageJsonPath);
+    const packageJsonChanged = normalizedChangedPaths.includes(packageJsonPath);
+    const basePackage = baseReleaseState?.byDir.get(pkg.dir);
+    const newlyReleaseEnabled =
+      manifestFileChanged &&
+      (!baseReleaseState || !basePackage || basePackage.publishFromCi !== true || basePackage.name !== pkg.name);
+    const isRelevant = packageJsonChanged || newlyReleaseEnabled;
 
     if (!isRelevant) continue;
     if (seen.has(pkg.name)) continue;
@@ -61,7 +143,9 @@ function collectReleasePackagesForChangedPaths(changedPaths, releasePackages = b
 }
 
 function main(changedPaths) {
-  const changedReleasePackages = collectReleasePackagesForChangedPaths(changedPaths);
+  const releasePackages = buildReleasePackagePlan();
+  const baseReleaseState = getBaseReleaseState(process.env.PAPERCLIP_RELEASE_BOOTSTRAP_BASE_SHA, releasePackages);
+  const changedReleasePackages = collectReleasePackagesForChangedPaths(changedPaths, releasePackages, baseReleaseState);
 
   if (changedReleasePackages.length === 0) {
     process.stdout.write("No release-enabled package manifests changed in this PR.\n");
@@ -118,4 +202,5 @@ if (process.argv[1] && normalizePath(process.argv[1]).endsWith("scripts/check-re
 export {
   classifyNpmViewFailure,
   collectReleasePackagesForChangedPaths,
+  getBaseReleaseState,
 };
