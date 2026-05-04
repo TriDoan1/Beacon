@@ -68,9 +68,10 @@ const buildGapCandidates = workspacePackages
 const packagesMissingTypecheck = buildGapCandidates.filter(
   ({ pkg }) => typeof pkg.scripts?.typecheck !== "string",
 );
-for (const workspacePkg of packagesMissingTypecheck) {
-  console.warn(
-    `[typecheck:build-gaps] warning: ${workspacePkg.name} has a build script without tsc but no explicit typecheck script.`,
+if (packagesMissingTypecheck.length > 0) {
+  const missingNames = packagesMissingTypecheck.map((workspacePkg) => workspacePkg.name).join(", ");
+  fail(
+    `Workspace packages with build scripts that skip tsc must define a typecheck script. Missing: ${missingNames}`,
   );
 }
 const buildGapPackages = buildGapCandidates.filter(
