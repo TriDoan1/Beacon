@@ -190,6 +190,42 @@ When you add a new public package:
 
 PR CI now checks changed release-enabled package manifests against npm. That catches a missing first-publish bootstrap before the change reaches `master`.
 
+### One-time bootstrap sequence for a new package
+
+The first publish of a brand-new package still needs one human maintainer with npm write access.
+After that, trusted publishing can take over.
+
+Example for `@paperclipai/adapter-acpx-local` from the repo root:
+
+```bash
+# expected before bootstrap: npm does not know this package yet
+npm view @paperclipai/adapter-acpx-local version
+
+# build the publish payload
+pnpm --filter @paperclipai/adapter-acpx-local build
+
+# confirm local npm auth
+npm whoami
+
+# preview the exact tarball contents
+cd packages/adapters/acpx-local
+npm pack --dry-run
+
+# one-time bootstrap publish
+npm publish --access public
+```
+
+After that first publish succeeds:
+
+1. open `https://www.npmjs.com/package/@paperclipai/adapter-acpx-local`
+2. go to `Settings` → `Trusted publishing`
+3. add repository `paperclipai/paperclip`
+4. set workflow filename to `release.yml`
+5. optionally go to `Settings` → `Publishing access` and enable `Require two-factor authentication and disallow tokens`
+6. keep `publishFromCi: true` in [`scripts/release-package-manifest.json`](../scripts/release-package-manifest.json)
+
+Once those steps are done, future canary and stable publishes for that package are automated through GitHub OIDC. The manual step is only the first package creation on npm.
+
 ## Rollback model
 
 Rollback does not unpublish anything.
