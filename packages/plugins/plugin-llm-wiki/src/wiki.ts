@@ -1339,7 +1339,7 @@ async function upsertPaperclipDistillationCursor(ctx: PluginContext, input: {
     scope.scopeKey,
     "paperclip_issue_history",
   ].join(":"));
-  await ctx.db.execute(
+  const rows = await ctx.db.query<{ id: string }>(
     `INSERT INTO ${distillationCursorTable(ctx)} AS paperclip_distillation_cursors
        (id, company_id, wiki_id, source_scope, scope_key, project_id, root_issue_id, source_kind, last_observed_at, pending_event_count, metadata)
      VALUES ($1, $2, $3, $4, $5, $6, $7, 'paperclip_issue_history', $8::timestamptz, $9, $10::jsonb)
@@ -1347,10 +1347,11 @@ async function upsertPaperclipDistillationCursor(ctx: PluginContext, input: {
      DO UPDATE SET last_observed_at = GREATEST(
                        COALESCE(paperclip_distillation_cursors.last_observed_at, EXCLUDED.last_observed_at),
                        COALESCE(EXCLUDED.last_observed_at, paperclip_distillation_cursors.last_observed_at)
-                     ),
+                   ),
                    pending_event_count = paperclip_distillation_cursors.pending_event_count + EXCLUDED.pending_event_count,
                    metadata = paperclip_distillation_cursors.metadata || EXCLUDED.metadata,
-                   updated_at = now()`,
+                   updated_at = now()
+     RETURNING id`,
     [
       cursorId,
       input.companyId,
@@ -1364,7 +1365,7 @@ async function upsertPaperclipDistillationCursor(ctx: PluginContext, input: {
       jsonParam(input.metadata ?? {}),
     ],
   );
-  return cursorId;
+  return rows[0]?.id ?? cursorId;
 }
 
 function appendBoundedSection(input: {
@@ -1784,14 +1785,15 @@ export async function createPaperclipDistillationWorkItem(ctx: PluginContext, in
   if (input.kind === "backfill" && !scope.projectId && !scope.rootIssueId) {
     throw new Error("Backfill work items must target a projectId or rootIssueId; whole-company backfill is not allowed.");
   }
-  await ctx.db.execute(
+  const rows = await ctx.db.query<{ id: string }>(
     `INSERT INTO ${distillationWorkItemTable(ctx)} AS paperclip_distillation_work_items
        (id, company_id, wiki_id, work_item_kind, status, priority, project_id, root_issue_id, requested_by_issue_id, idempotency_key, metadata)
      VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10::jsonb)
      ON CONFLICT (company_id, wiki_id, idempotency_key)
      DO UPDATE SET priority = EXCLUDED.priority,
                    metadata = paperclip_distillation_work_items.metadata || EXCLUDED.metadata,
-                   updated_at = now()`,
+                   updated_at = now()
+     RETURNING id`,
     [
       itemId,
       input.companyId,
@@ -1808,7 +1810,8 @@ export async function createPaperclipDistillationWorkItem(ctx: PluginContext, in
       }),
     ],
   );
-  return { status: "pending", workItemId: itemId, wikiId, kind: input.kind, sourceScope: scope.sourceScope };
+  const persistedItemId = rows[0]?.id ?? itemId;
+  return { status: "pending", workItemId: persistedItemId, wikiId, kind: input.kind, sourceScope: scope.sourceScope };
 }
 
 function sourceRefLabel(ref: PaperclipSourceRef): string {

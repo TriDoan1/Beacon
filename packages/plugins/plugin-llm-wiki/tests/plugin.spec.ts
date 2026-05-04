@@ -1496,7 +1496,7 @@ Route sidebar state stays attached to the selected wiki page.
       projectId: "77777777-7777-4777-8777-777777777780",
     });
 
-    const workItemWrites = harness.dbExecutes.filter((execute) => execute.sql.includes("paperclip_distillation_work_items"));
+    const workItemWrites = harness.dbQueries.filter((query) => query.sql.includes("paperclip_distillation_work_items"));
     expect(workItemWrites).toHaveLength(5);
     expect(workItemWrites.map((write) => write.params?.[3])).toEqual(["manual", "manual", "retry", "backfill", "manual"]);
     expect(workItemWrites[1].params?.[0]).toBe(workItemWrites[0].params?.[0]);
