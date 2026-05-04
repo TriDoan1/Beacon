@@ -87,7 +87,7 @@ function fail(message) {
 
 function readOptionValue(argv, index, argName) {
   const value = argv[index + 1];
-  if (!value) {
+  if (value === undefined) {
     fail(`Missing value for ${argName}`);
   }
 
