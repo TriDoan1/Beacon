@@ -48,6 +48,7 @@ type Props = {
   agents: AgentLookup;
   projects: ProjectLookup;
   onRestoreSecretMaterials: (response: RestoreRoutineRevisionResponse) => void;
+  onRestored?: (response: RestoreRoutineRevisionResponse) => void;
 };
 
 export function RoutineHistoryTab({
@@ -59,6 +60,7 @@ export function RoutineHistoryTab({
   agents,
   projects,
   onRestoreSecretMaterials,
+  onRestored,
 }: Props) {
   const queryClient = useQueryClient();
   const { pushToast } = useToastActions();
@@ -116,6 +118,7 @@ export function RoutineHistoryTab({
         tone: "success",
       });
       onRestoreSecretMaterials(data);
+      onRestored?.(data);
       setConfirmOpen(false);
       setRestoreSummary("");
       setSelectedRevisionId(data.revision.id);

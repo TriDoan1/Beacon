@@ -63,7 +63,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import type { RoutineTrigger, RoutineVariable } from "@paperclipai/shared";
+import type { RoutineDetail as RoutineDetailType, RoutineTrigger, RoutineVariable } from "@paperclipai/shared";
 
 const concurrencyPolicies = ["coalesce_if_active", "always_enqueue", "skip_if_active"];
 const catchUpPolicies = ["skip_missed", "enqueue_missed_with_cap"];
@@ -1235,6 +1235,32 @@ export function RoutineDetail() {
                   webhookSecret: recreated.webhookSecret,
                 });
               }
+            }}
+            onRestored={(response: RestoreRoutineRevisionResponse) => {
+              setSaveConflict(false);
+              queryClient.setQueryData<RoutineDetailType | undefined>(
+                queryKeys.routines.detail(routineId!),
+                (prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        ...response.routine,
+                        latestRevisionId: response.revision.id,
+                        latestRevisionNumber: response.revision.revisionNumber,
+                      }
+                    : prev,
+              );
+              setEditDraft({
+                title: response.routine.title,
+                description: response.routine.description ?? "",
+                projectId: response.routine.projectId ?? "",
+                assigneeAgentId: response.routine.assigneeAgentId ?? "",
+                priority: response.routine.priority,
+                concurrencyPolicy: response.routine.concurrencyPolicy,
+                catchUpPolicy: response.routine.catchUpPolicy,
+                variables: response.routine.variables,
+              });
+              hydratedRoutineIdRef.current = response.routine.id;
             }}
           />
         </TabsContent>

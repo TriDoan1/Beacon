@@ -317,4 +317,57 @@ describe("RoutineHistoryTab", () => {
     );
     expect(successCall).toBeTruthy();
   });
+
+  it("invokes onRestored with the restore response so the editor can rehydrate (PAP-3588)", async () => {
+    const current = createRevision({ id: "revision-2", revisionNumber: 2 });
+    const old = createRevision({
+      id: "revision-1",
+      revisionNumber: 1,
+      snapshot: snapshotV1({ description: "Original description" }),
+    });
+    mockRoutinesApi.listRevisions.mockResolvedValue([current, old]);
+    const restoredRoutine = createRoutine({
+      description: "Original description",
+      latestRevisionId: "revision-3",
+      latestRevisionNumber: 3,
+    });
+    mockRoutinesApi.restoreRevision.mockResolvedValue({
+      routine: restoredRoutine,
+      revision: createRevision({
+        id: "revision-3",
+        revisionNumber: 3,
+        restoredFromRevisionId: "revision-1",
+      }),
+      restoredFromRevisionId: "revision-1",
+      restoredFromRevisionNumber: 1,
+      secretMaterials: [],
+    });
+    const onRestored = vi.fn();
+    await render({ onRestored });
+    const oldRow = container.querySelector(
+      "[data-testid='revision-row-1']",
+    ) as HTMLButtonElement | null;
+    await act(async () => {
+      oldRow?.click();
+    });
+    await flush();
+    const restoreButtons = Array.from(container.querySelectorAll("button")).filter(
+      (button) => button.textContent === "Restore as new revision",
+    );
+    await act(async () => {
+      restoreButtons[0].click();
+    });
+    await flush();
+    const confirmButtons = Array.from(container.querySelectorAll("button")).filter((b) =>
+      (b.textContent ?? "").includes("Restore as revision 3"),
+    );
+    await act(async () => {
+      confirmButtons[0].click();
+    });
+    await flush();
+    expect(onRestored).toHaveBeenCalledTimes(1);
+    const [response] = onRestored.mock.calls[0];
+    expect(response.routine).toEqual(restoredRoutine);
+    expect(response.revision.id).toBe("revision-3");
+  });
 });
