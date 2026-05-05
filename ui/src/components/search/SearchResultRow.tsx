@@ -51,7 +51,7 @@ export interface SearchResultRowProps {
 }
 
 const ROW_BASE =
-  "group flex items-start gap-3 px-4 transition-colors no-underline text-inherit hover:bg-muted/40";
+  "group flex items-start gap-3 rounded-md px-3 transition-colors no-underline text-inherit hover:bg-muted/40";
 
 function SearchResultRowImpl({
   result,
@@ -63,7 +63,7 @@ function SearchResultRowImpl({
     return (
       <Link
         to={result.href}
-        className={cn(ROW_BASE, "py-2.5", isActive && "bg-muted/40", className)}
+        className={cn(ROW_BASE, "py-3", isActive && "bg-muted/40", className)}
         data-result-type="agent"
       >
         <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -90,7 +90,7 @@ function SearchResultRowImpl({
     return (
       <Link
         to={result.href}
-        className={cn(ROW_BASE, "py-2.5", isActive && "bg-muted/40", className)}
+        className={cn(ROW_BASE, "py-3", isActive && "bg-muted/40", className)}
         data-result-type="project"
       >
         <Hexagon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -117,12 +117,13 @@ function SearchResultRowImpl({
   const updated = formatRelativeTime(result.updatedAt ?? issue.updatedAt);
   const titleHighlights = result.snippets.find((snippet) => snippet.field === "title")?.highlights;
   const bodySnippets = result.snippets.filter((snippet) => snippet.field !== "title").slice(0, 2);
+  const previewImageUrl = result.previewImageUrl;
 
   return (
     <Link
       to={result.href}
       disableIssueQuicklook
-      className={cn(ROW_BASE, "py-3", isActive && "bg-muted/40", className)}
+      className={cn(ROW_BASE, "py-4", isActive && "bg-muted/40", className)}
       data-result-type="issue"
     >
       <div className="mt-1 shrink-0">
@@ -160,6 +161,15 @@ function SearchResultRowImpl({
           {updated ? <span className="ml-auto tabular-nums">{updated}</span> : null}
         </div>
       </div>
+      {previewImageUrl ? (
+        <img
+          src={previewImageUrl}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="ml-2 mt-0.5 h-[88px] w-[88px] shrink-0 rounded-md border border-border bg-muted object-cover"
+        />
+      ) : null}
     </Link>
   );
 }

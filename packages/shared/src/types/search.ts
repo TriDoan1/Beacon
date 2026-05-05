@@ -41,6 +41,7 @@ export interface CompanySearchResult {
   snippets: CompanySearchSnippet[];
   issue?: CompanySearchIssueSummary;
   updatedAt: string | null;
+  previewImageUrl: string | null;
 }
 
 export interface CompanySearchResponse {

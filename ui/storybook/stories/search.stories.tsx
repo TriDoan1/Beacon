@@ -62,6 +62,7 @@ function buildIssueResult(overrides: IssueResultOverrides): CompanySearchResult 
     snippets: overrides.snippets ?? [],
     issue: baseIssue,
     updatedAt: baseIssue.updatedAt,
+    previewImageUrl: overrides.previewImageUrl ?? null,
   };
 }
 
@@ -112,6 +113,8 @@ const fixtureResults: CompanySearchResult[] = [
         highlights: [{ start: 12, end: 16 }, { start: 26, end: 30 }],
       },
     ],
+    previewImageUrl:
+      "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23a78bfa'/><text x='50' y='55' font-size='14' fill='white' text-anchor='middle' font-family='sans-serif'>chart</text></svg>",
   }),
   buildIssueResult({
     id: "issue-3",
@@ -154,6 +157,7 @@ const fixtureAgents: CompanySearchResult[] = storybookAgents.slice(0, 1).map((ag
       ]
     : [],
   updatedAt: new Date().toISOString(),
+  previewImageUrl: null,
 }));
 
 const fixtureProjects: CompanySearchResult[] = storybookProjects.slice(0, 1).map((project) => ({
@@ -176,6 +180,7 @@ const fixtureProjects: CompanySearchResult[] = storybookProjects.slice(0, 1).map
       ]
     : [],
   updatedAt: new Date().toISOString(),
+  previewImageUrl: null,
 }));
 
 const fixtureResponse: CompanySearchResponse = {
@@ -261,8 +266,8 @@ function SearchPagePreview({
       </div>
 
       {state === "results" ? (
-        <div className="flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+        <div className="mx-auto flex w-full max-w-[680px] flex-col px-2 sm:px-4">
+          <div className="flex items-center justify-between py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
             <span>{response.results.length} results · sorted by relevance</span>
           </div>
           <section aria-label="Issues" className="flex flex-col">
@@ -273,9 +278,9 @@ function SearchPagePreview({
                   {fixtureResults.length}
                 </span>
               }
-              className="px-4 pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
+              className="pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
             />
-            <div className="flex flex-col divide-y divide-border/50">
+            <div className="flex flex-col gap-y-1">
               {fixtureResults.map((result) => (
                 <SearchResultRow
                   key={result.id}
@@ -285,7 +290,7 @@ function SearchPagePreview({
               ))}
             </div>
           </section>
-          <section aria-label="Agents" className="mt-3 flex flex-col border-t border-border">
+          <section aria-label="Agents" className="mt-6 flex flex-col">
             <IssueGroupHeader
               label="Agents"
               trailing={
@@ -293,15 +298,15 @@ function SearchPagePreview({
                   {fixtureAgents.length}
                 </span>
               }
-              className="px-4 pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
+              className="pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
             />
-            <div className="flex flex-col divide-y divide-border/50">
+            <div className="flex flex-col gap-y-1">
               {fixtureAgents.map((result) => (
                 <SearchResultRow key={result.id} result={result} />
               ))}
             </div>
           </section>
-          <section aria-label="Projects" className="mt-3 flex flex-col border-t border-border">
+          <section aria-label="Projects" className="mt-6 flex flex-col">
             <IssueGroupHeader
               label="Projects"
               trailing={
@@ -309,9 +314,9 @@ function SearchPagePreview({
                   {fixtureProjects.length}
                 </span>
               }
-              className="px-4 pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
+              className="pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
             />
-            <div className="flex flex-col divide-y divide-border/50">
+            <div className="flex flex-col gap-y-1">
               {fixtureProjects.map((result) => (
                 <SearchResultRow key={result.id} result={result} />
               ))}
@@ -572,7 +577,7 @@ function SearchStories() {
             <div className="paperclip-story__label">Search result row</div>
             <h2 className="mt-1 text-lg font-semibold">Issue, agent, project rows</h2>
           </div>
-          <div className="flex flex-col divide-y divide-border">
+          <div className="mx-auto flex w-full max-w-[680px] flex-col gap-y-1">
             {fixtureResults.map((result) => (
               <SearchResultRow
                 key={result.id}

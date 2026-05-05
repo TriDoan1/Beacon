@@ -577,20 +577,20 @@ function SearchTabContent({
   if (!hasResults) return null;
 
   return (
-    <div className="flex flex-col" data-testid="search-results">
-      <div className="flex items-center justify-between px-4 py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+    <div className="mx-auto flex w-full max-w-[680px] flex-col px-2 sm:px-4" data-testid="search-results">
+      <div className="flex items-center justify-between py-2 text-[11px] uppercase tracking-wide text-muted-foreground">
         <span>
           {totalResults === 1 ? "1 result" : `${totalResults} results`} · sorted by relevance
         </span>
         {isFetching ? <span aria-live="polite" className="normal-case tracking-normal">Updating…</span> : null}
       </div>
-      <div className="flex flex-col">
+      <div className="flex flex-col pb-10">
         {scope === "all" ? (
           subgroups.map((group, groupIndex) => (
             <section
               key={group.key}
               aria-label={SUBGROUP_LABELS[group.key]}
-              className={cn("flex flex-col", groupIndex > 0 && "mt-3 border-t border-border")}
+              className={cn("flex flex-col", groupIndex > 0 && "mt-6")}
             >
               <IssueGroupHeader
                 label={SUBGROUP_LABELS[group.key]}
@@ -599,9 +599,9 @@ function SearchTabContent({
                     {group.results.length}
                   </span>
                 }
-                className="px-4 pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
+                className="pt-2 pb-1 text-[11px] tracking-wider text-muted-foreground"
               />
-              <div className="flex flex-col divide-y divide-border/50">
+              <div className="flex flex-col gap-y-1">
                 {group.results.map((result) => (
                   <SearchResultRow
                     key={`${result.type}:${result.id}:${result.href}`}
@@ -613,7 +613,7 @@ function SearchTabContent({
             </section>
           ))
         ) : (
-          <div className="flex flex-col divide-y divide-border/50">
+          <div className="flex flex-col gap-y-1">
             {subgroups
               .flatMap((group) => group.results)
               .map((result) => (

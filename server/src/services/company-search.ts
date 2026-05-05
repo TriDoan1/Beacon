@@ -109,6 +109,14 @@ function plainText(value: string | null | undefined) {
     .trim();
 }
 
+const MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/;
+
+function extractFirstImageUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const match = MARKDOWN_IMAGE_PATTERN.exec(value);
+  return match ? match[1] : null;
+}
+
 function findFirstMatchIndex(value: string, terms: string[]) {
   const lower = value.toLowerCase();
   let best = -1;
@@ -247,6 +255,10 @@ function issueResult(row: IssueSearchRow, prefix: string, normalizedQuery: strin
     projectId: row.projectId,
     updatedAt: iso(row.updatedAt)!,
   };
+  const previewImageUrl =
+    extractFirstImageUrl(row.description) ??
+    extractFirstImageUrl(row.commentSnippet) ??
+    extractFirstImageUrl(row.documentSnippet);
   return {
     id: row.id,
     type: "issue",
@@ -259,6 +271,7 @@ function issueResult(row: IssueSearchRow, prefix: string, normalizedQuery: strin
     snippets,
     issue,
     updatedAt: issue.updatedAt,
+    previewImageUrl,
   };
 }
 
@@ -643,6 +656,7 @@ export function companySearchService(db: Db) {
             snippet: snippet?.text ?? null,
             snippets: snippet ? [snippet] : [],
             updatedAt: iso(row.updatedAt),
+            previewImageUrl: null,
           };
         }),
         ...(projectRows as SimpleSearchRow[]).map((row) => {
@@ -659,6 +673,7 @@ export function companySearchService(db: Db) {
             snippet: snippet?.text ?? null,
             snippets: snippet ? [snippet] : [],
             updatedAt: iso(row.updatedAt),
+            previewImageUrl: null,
           };
         }),
       ].sort((left, right) => {
