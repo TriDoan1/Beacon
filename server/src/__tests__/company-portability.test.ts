@@ -2343,6 +2343,99 @@ describe("company portability", () => {
     expect(materializedFiles["AGENTS.md"]).not.toContain('name: "ClaudeCoder"');
   });
 
+  it("does not silently add local adapter permission bypasses on import", async () => {
+    const portability = companyPortabilityService({} as any);
+
+    companySvc.create.mockResolvedValue({
+      id: "company-imported",
+      name: "Imported Paperclip",
+    });
+    accessSvc.ensureMembership.mockResolvedValue(undefined);
+    agentSvc.create.mockImplementation(async (_companyId: string, input: Record<string, unknown>) => ({
+      id: "agent-created",
+      name: String(input.name),
+      adapterType: input.adapterType,
+      adapterConfig: input.adapterConfig,
+    }));
+
+    const exported = await portability.exportBundle("company-1", {
+      include: {
+        company: true,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+    });
+
+    agentSvc.list.mockResolvedValue([]);
+
+    await portability.importBundle({
+      source: {
+        type: "inline",
+        rootPath: exported.rootPath,
+        files: exported.files,
+      },
+      include: {
+        company: true,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+      target: {
+        mode: "new_company",
+        newCompanyName: "Imported Paperclip",
+      },
+      agents: ["claudecoder"],
+      collisionStrategy: "rename",
+    }, "user-1");
+
+    expect(agentSvc.create).toHaveBeenCalledWith("company-imported", expect.objectContaining({
+      adapterType: "claude_local",
+      adapterConfig: expect.not.objectContaining({
+        dangerouslySkipPermissions: expect.anything(),
+      }),
+    }));
+
+    await portability.importBundle({
+      source: {
+        type: "inline",
+        rootPath: exported.rootPath,
+        files: exported.files,
+      },
+      include: {
+        company: true,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+      target: {
+        mode: "new_company",
+        newCompanyName: "Imported Paperclip",
+      },
+      agents: ["claudecoder"],
+      collisionStrategy: "rename",
+      adapterOverrides: {
+        claudecoder: {
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+      },
+    }, "user-1");
+
+    expect(agentSvc.create).toHaveBeenLastCalledWith("company-imported", expect.objectContaining({
+      adapterType: "codex_local",
+      adapterConfig: expect.objectContaining({
+        extraArgs: ["--skip-git-repo-check"],
+      }),
+    }));
+    expect(agentSvc.create).toHaveBeenLastCalledWith("company-imported", expect.objectContaining({
+      adapterConfig: expect.not.objectContaining({
+        dangerouslyBypassApprovalsAndSandbox: expect.anything(),
+        dangerouslyBypassSandbox: expect.anything(),
+      }),
+    }));
+  });
+
   it("preserves issue labelIds through export and import round-trip", async () => {
     const portability = companyPortabilityService({} as any);
 
