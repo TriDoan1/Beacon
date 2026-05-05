@@ -46,12 +46,12 @@ describe("company search query validation", () => {
     expect(parsed.scope).toBe("all");
   });
 
-  it("keeps the internal per-branch fetch limit independent of high offsets", () => {
+  it("includes offset in the internal per-branch fetch window", () => {
     const lowOffset = companySearchQuerySchema.parse({ q: "needle", limit: "50", offset: "0" });
     const highOffset = companySearchQuerySchema.parse({ q: "needle", limit: "50", offset: "9000" });
 
-    expect(companySearchBranchFetchLimit(lowOffset.limit)).toBe(COMPANY_SEARCH_BRANCH_FETCH_LIMIT);
-    expect(companySearchBranchFetchLimit(highOffset.limit)).toBe(COMPANY_SEARCH_BRANCH_FETCH_LIMIT);
+    expect(companySearchBranchFetchLimit(lowOffset.limit, lowOffset.offset)).toBe(51);
+    expect(companySearchBranchFetchLimit(highOffset.limit, highOffset.offset)).toBe(COMPANY_SEARCH_BRANCH_FETCH_LIMIT);
   });
 });
 
@@ -368,6 +368,27 @@ describeEmbeddedPostgres("companySearchService", () => {
       agentDecoyId,
       projectDecoyId,
     ]));
+  });
+
+  it("applies offset after merging cross-type result ranking", async () => {
+    const companyId = await createCompany();
+    const base = new Date("2026-01-01T00:00:00.000Z").getTime();
+    const agentIds = await Promise.all([
+      createAgent(companyId, { name: "Needle agent 1", updatedAt: new Date(base + 6_000) }),
+      createAgent(companyId, { name: "Needle agent 2", updatedAt: new Date(base + 5_000) }),
+      createAgent(companyId, { name: "Needle agent 3", updatedAt: new Date(base + 4_000) }),
+    ]);
+    const projectIds = await Promise.all([
+      createProject(companyId, { name: "Needle project 1", updatedAt: new Date(base + 3_000) }),
+      createProject(companyId, { name: "Needle project 2", updatedAt: new Date(base + 2_000) }),
+      createProject(companyId, { name: "Needle project 3", updatedAt: new Date(base + 1_000) }),
+    ]);
+
+    const result = await svc.search(companyId, companySearchQuerySchema.parse({ q: "needle", limit: "2", offset: "2" }));
+
+    expect(result.results.map((row) => row.id)).toEqual([agentIds[2], projectIds[0]]);
+    expect(result.countsByType).toEqual({ issue: 0, agent: 3, project: 3 });
+    expect(result.hasMore).toBe(true);
   });
 
   it("escapes underscore and backslash characters in issue phrase and token patterns", async () => {

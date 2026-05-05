@@ -4,6 +4,7 @@ import type { Db } from "@paperclipai/db";
 import { agents, companies, issues, projects } from "@paperclipai/db";
 import {
   COMPANY_SEARCH_MAX_LIMIT,
+  COMPANY_SEARCH_MAX_OFFSET,
   COMPANY_SEARCH_MAX_TOKENS,
   type CompanySearchIssueSummary,
   type CompanySearchQuery,
@@ -26,7 +27,7 @@ const FUZZY_PAIR_MEDIUM_MAX_EDITS = 1;
 const FUZZY_PAIR_SHORT_MAX_EDITS = 0;
 const FUZZY_IDENTIFIER_SIMILARITY_THRESHOLD = 0.45;
 const SNIPPET_MAX_CHARS = 240;
-export const COMPANY_SEARCH_BRANCH_FETCH_LIMIT = COMPANY_SEARCH_MAX_LIMIT + 1;
+export const COMPANY_SEARCH_BRANCH_FETCH_LIMIT = COMPANY_SEARCH_MAX_OFFSET + COMPANY_SEARCH_MAX_LIMIT + 1;
 
 type IssueSearchRow = {
   id: string;
@@ -291,9 +292,10 @@ function simpleTextCondition(fields: SQL[], containsPattern: string, tokenArray:
   return sql<boolean>`(${sql.join([...phraseConditions, ...tokenConditions], sql` OR `)})`;
 }
 
-export function companySearchBranchFetchLimit(limit: number) {
+export function companySearchBranchFetchLimit(limit: number, offset = 0) {
   const normalizedLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : COMPANY_SEARCH_MAX_LIMIT;
-  return Math.min(COMPANY_SEARCH_BRANCH_FETCH_LIMIT, normalizedLimit + 1);
+  const normalizedOffset = Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+  return Math.min(COMPANY_SEARCH_BRANCH_FETCH_LIMIT, normalizedOffset + normalizedLimit + 1);
 }
 
 export function companySearchService(db: Db) {
@@ -324,7 +326,7 @@ export function companySearchService(db: Db) {
         .where(eq(companies.id, companyId))
         .then((rows) => rows[0] ?? null);
       const prefix = routePrefix(company?.issuePrefix);
-      const fetchLimit = companySearchBranchFetchLimit(limit);
+      const fetchLimit = companySearchBranchFetchLimit(limit, offset);
       const escapedTokens = tokens.map(escapeLikePattern);
       const tokenArray = sqlTextArray(escapedTokens);
       const fuzzyTokens = fuzzyEligibleTokens(tokens);
@@ -596,7 +598,6 @@ export function companySearchService(db: Db) {
           ))
           .orderBy(desc(score), desc(issues.updatedAt), desc(issues.id))
           .limit(fetchLimit)
-          .offset(offset)
         : [];
 
       const simpleCondition = simpleTextCondition([
@@ -618,7 +619,6 @@ export function companySearchService(db: Db) {
           .where(and(eq(agents.companyId, companyId), simpleCondition))
           .orderBy(desc(agents.updatedAt), desc(agents.id))
           .limit(fetchLimit)
-          .offset(offset)
         : [];
 
       const projectCondition = simpleTextCondition([
@@ -637,7 +637,6 @@ export function companySearchService(db: Db) {
           .where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt), projectCondition))
           .orderBy(desc(projects.updatedAt), desc(projects.id))
           .limit(fetchLimit)
-          .offset(offset)
         : [];
 
       const results: CompanySearchResult[] = [
@@ -681,7 +680,7 @@ export function companySearchService(db: Db) {
         return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
       });
 
-      const paged = results.slice(0, limit);
+      const paged = results.slice(offset, offset + limit);
       return {
         query: query.q,
         normalizedQuery,
@@ -690,7 +689,7 @@ export function companySearchService(db: Db) {
         offset,
         results: paged,
         countsByType: makeCounts(results),
-        hasMore: results.length > limit,
+        hasMore: results.length > offset + limit,
       };
     },
   };
