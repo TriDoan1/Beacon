@@ -1341,6 +1341,66 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(activity.some((event) => event.action === "issue.successful_run_handoff_required")).toBe(true);
   });
 
+  it("requeues a missing-disposition handoff when the previous corrective wake was cancelled", async () => {
+    const { companyId, agentId, runId, issueId } = await seedQueuedIssueRunFixture();
+    const idempotencyKey = `finish_successful_run_handoff:${issueId}:${runId}:1`;
+    await db.insert(agentWakeupRequests).values({
+      id: randomUUID(),
+      companyId,
+      agentId,
+      source: "automation",
+      triggerDetail: "system",
+      reason: "finish_successful_run_handoff",
+      payload: {
+        issueId,
+        sourceRunId: runId,
+        handoffRequired: true,
+        handoffReason: SUCCESSFUL_RUN_MISSING_STATE_REASON,
+      },
+      status: "cancelled",
+      idempotencyKey,
+      requestedAt: new Date("2026-03-19T00:00:01.000Z"),
+      finishedAt: new Date("2026-03-19T00:00:02.000Z"),
+      updatedAt: new Date("2026-03-19T00:00:02.000Z"),
+    });
+    mockAdapterExecute.mockImplementationOnce(async (ctx: { runId: string }) => {
+      await db.insert(issueComments).values({
+        companyId,
+        issueId,
+        authorAgentId: agentId,
+        createdByRunId: ctx.runId,
+        body: "Implemented recovery handling, but did not choose a final issue state.",
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        errorMessage: null,
+        summary: "Implemented recovery handling, but did not choose a final issue state.",
+        provider: "test",
+        model: "test-model",
+      };
+    });
+    const heartbeat = heartbeatService(db);
+
+    await heartbeat.resumeQueuedRuns();
+    await waitForRunToSettle(heartbeat, runId, 5_000);
+
+    const handoffWakeups = await waitForValue(async () => {
+      const rows = await db
+        .select()
+        .from(agentWakeupRequests)
+        .where(eq(agentWakeupRequests.idempotencyKey, idempotencyKey));
+      const requeued = rows.filter((wakeup) => wakeup.reason === "finish_successful_run_handoff");
+      return requeued.length > 1 ? requeued : null;
+    }, 5_000);
+    await waitForHeartbeatIdle(db, 5_000);
+
+    expect(handoffWakeups).toHaveLength(2);
+    expect(handoffWakeups.filter((wakeup) => wakeup.status === "cancelled")).toHaveLength(1);
+    expect(handoffWakeups.some((wakeup) => wakeup.status !== "cancelled")).toBe(true);
+  });
+
   it("queues one missing-disposition handoff for artifact-producing successful runs left in progress", async () => {
     const { companyId, agentId, runId, issueId } = await seedQueuedIssueRunFixture();
     mockAdapterExecute.mockImplementationOnce(async (ctx: { runId: string }) => {
