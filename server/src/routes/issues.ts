@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { activityLog, issueExecutionDecisions } from "@paperclipai/db";
 import {
@@ -189,25 +189,27 @@ async function listSuccessfulRunHandoffStates(
   issueIds: string[],
 ): Promise<Map<string, SuccessfulRunHandoffState>> {
   if (issueIds.length === 0) return new Map();
-  const result = await db.execute(sql`
-    SELECT DISTINCT ON (${activityLog.entityId})
-      ${activityLog.entityId} AS "entityId",
-      ${activityLog.action} AS "action",
-      ${activityLog.agentId} AS "agentId",
-      ${activityLog.runId} AS "runId",
-      ${activityLog.details} AS "details",
-      ${activityLog.createdAt} AS "createdAt"
-    FROM ${activityLog}
-    WHERE ${activityLog.companyId} = ${companyId}
-      AND ${activityLog.entityType} = 'issue'
-      AND ${activityLog.entityId} IN (${sql.join(issueIds.map((id) => sql`${id}`), sql`, `)})
-      AND ${activityLog.action} IN (${sql.join(SUCCESSFUL_RUN_HANDOFF_ACTIONS.map((action) => sql`${action}`), sql`, `)})
-    ORDER BY ${activityLog.entityId}, ${activityLog.createdAt} DESC, ${activityLog.id} DESC
-  `);
-  const rows = Array.from(result as Iterable<SuccessfulRunHandoffActivityRow>);
+  const rows = await db
+    .select({
+      entityId: activityLog.entityId,
+      action: activityLog.action,
+      agentId: activityLog.agentId,
+      runId: activityLog.runId,
+      details: activityLog.details,
+      createdAt: activityLog.createdAt,
+    })
+    .from(activityLog)
+    .where(and(
+      eq(activityLog.companyId, companyId),
+      eq(activityLog.entityType, "issue"),
+      inArray(activityLog.entityId, issueIds),
+      inArray(activityLog.action, [...SUCCESSFUL_RUN_HANDOFF_ACTIONS]),
+    ))
+    .orderBy(activityLog.entityId, desc(activityLog.createdAt), desc(activityLog.id)) as SuccessfulRunHandoffActivityRow[];
 
   const states = new Map<string, SuccessfulRunHandoffState>();
   for (const row of rows) {
+    if (states.has(row.entityId)) continue;
     const state = successfulRunHandoffStateFromActivity(row);
     if (state) states.set(row.entityId, state);
   }
