@@ -1416,9 +1416,14 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       return matches.length > 0 ? matches : null;
     }, 5_000);
     await waitForHeartbeatIdle(db, 5_000);
+    const classifiedRun = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .then((rows) => rows[0] ?? null);
 
-    expect(settledRun?.status).toBe("succeeded");
-    expect(settledRun?.livenessState).toBe("advanced");
+    expect(classifiedRun?.status ?? settledRun?.status).toBe("succeeded");
+    expect(classifiedRun?.livenessState).toBe("advanced");
     expect(handoffWakeups).toHaveLength(1);
     expect(handoffWakeups[0]?.idempotencyKey).toBe(`finish_successful_run_handoff:${issueId}:${runId}:1`);
 
