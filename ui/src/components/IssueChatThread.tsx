@@ -16,6 +16,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
@@ -99,8 +100,15 @@ import {
   isSuccessfulRunHandoffComment,
   isSuccessfulRunHandoffEscalationComment,
 } from "../lib/successful-run-handoff";
-import { SystemNotice } from "./SystemNotice";
-import { buildSystemNoticeProps } from "../lib/system-notice-comment";
+import {
+  SystemNotice,
+  type SystemNoticeMetadataRow,
+  type SystemNoticeMetadataSection,
+} from "./SystemNotice";
+import {
+  buildSystemNoticeProps,
+  mapCommentMetadataToSystemNoticeSections,
+} from "../lib/system-notice-comment";
 import type {
   IssueCommentMetadata,
   IssueCommentPresentation,
@@ -2021,6 +2029,148 @@ function isStaleSuccessfulRunHandoffNotice(input: {
   return false;
 }
 
+function StaleDispositionWarningMetadataRow({ row }: { row: SystemNoticeMetadataRow }) {
+  const label = (
+    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+      {row.label}
+    </span>
+  );
+  const value = (() => {
+    switch (row.kind) {
+      case "text":
+        return <span>{row.value}</span>;
+      case "code":
+        return (
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80">
+            {row.value}
+          </code>
+        );
+      case "issue": {
+        const content = (
+          <>
+            <span>{row.identifier}</span>
+            {row.title ? <span className="text-muted-foreground"> - {row.title}</span> : null}
+          </>
+        );
+        return row.href ? (
+          <a href={row.href} className="font-medium text-foreground underline-offset-2 hover:underline">
+            {content}
+          </a>
+        ) : (
+          <span className="font-medium text-foreground">{content}</span>
+        );
+      }
+      case "agent":
+        return row.href ? (
+          <a href={row.href} className="font-medium text-foreground underline-offset-2 hover:underline">
+            {row.name}
+          </a>
+        ) : (
+          <span className="font-medium text-foreground">{row.name}</span>
+        );
+      case "run": {
+        const runShort = row.runId.length > 12 ? `${row.runId.slice(0, 8)}...` : row.runId;
+        const content = (
+          <>
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80">
+              {runShort}
+            </code>
+            {row.status ? <span>{row.status}</span> : null}
+          </>
+        );
+        return row.href ? (
+          <a href={row.href} className="inline-flex items-center gap-1.5 underline-offset-2 hover:underline">
+            {content}
+          </a>
+        ) : (
+          <span className="inline-flex items-center gap-1.5">{content}</span>
+        );
+      }
+    }
+  })();
+
+  return (
+    <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2 text-xs leading-5">
+      {label}
+      <div className="min-w-0 break-words text-foreground/80">{value}</div>
+    </div>
+  );
+}
+
+function StaleDispositionWarningDetails({
+  sections,
+}: {
+  sections: SystemNoticeMetadataSection[];
+}) {
+  if (sections.length === 0) {
+    return <div className="text-xs leading-5 text-muted-foreground">No additional details.</div>;
+  }
+
+  return (
+    <div className="space-y-3 text-left">
+      {sections.map((section, sectionIdx) => (
+        <div key={sectionIdx} className="space-y-1.5">
+          {section.title ? (
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              {section.title}
+            </div>
+          ) : null}
+          <div className="space-y-1">
+            {section.rows.map((row, rowIdx) => (
+              <StaleDispositionWarningMetadataRow key={rowIdx} row={row} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StaleDispositionWarningRow({
+  anchorId,
+  message,
+  metadata,
+  runAgentId,
+}: {
+  anchorId?: string;
+  message: ThreadMessage;
+  metadata: IssueCommentMetadata | null;
+  runAgentId?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const detailsId = useId();
+  const sections = mapCommentMetadataToSystemNoticeSections(metadata, { runAgentId });
+
+  return (
+    <div id={anchorId} className="group flex justify-end py-1" data-testid="stale-disposition-warning">
+      <div className="max-w-[min(42rem,100%)] text-right">
+        <div className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-xs">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={detailsId}
+            onClick={() => setOpen((value) => !value)}
+            className="font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            Stale disposition warning
+          </button>
+          <a
+            href={anchorId ? `#${anchorId}` : undefined}
+            className="text-muted-foreground transition-colors hover:text-foreground hover:underline"
+          >
+            {timeAgo(message.createdAt)}
+          </a>
+        </div>
+        {open ? (
+          <div id={detailsId} className="mt-2 border-r border-border/70 pr-3">
+            <StaleDispositionWarningDetails sections={sections} />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function SystemNoticeCommentRow({
   message,
   anchorId,
@@ -2065,18 +2215,9 @@ function SystemNoticeCommentRow({
   })();
 
   const props = buildSystemNoticeProps({
-    presentation: staleSuccessfulRunHandoffNotice
-      ? {
-          kind: "system_notice",
-          tone: "neutral",
-          title: "Stale disposition warning",
-          detailsDefaultOpen: false,
-        }
-      : presentation,
+    presentation,
     metadata: commentMetadata,
-    body: staleSuccessfulRunHandoffNotice ? (
-      <span>This disposition warning is stale because the issue now has a newer disposition.</span>
-    ) : (
+    body: (
       <MarkdownBody className="text-sm leading-6" softBreaks onImageClick={onImageClick}>
         {bodyText}
       </MarkdownBody>
@@ -2102,10 +2243,21 @@ function SystemNoticeCommentRow({
     });
   };
 
+  if (staleSuccessfulRunHandoffNotice) {
+    return (
+      <StaleDispositionWarningRow
+        anchorId={anchorId}
+        message={message}
+        metadata={commentMetadata}
+        runAgentId={runAgentId}
+      />
+    );
+  }
+
   return (
     <div id={anchorId} className="group">
       <div className="py-1">
-        <SystemNotice {...props} compact={staleSuccessfulRunHandoffNotice} />
+        <SystemNotice {...props} />
         <div className="mt-1 flex items-center justify-end gap-1.5 px-1 opacity-0 transition-opacity group-hover:opacity-100">
           <Tooltip>
             <TooltipTrigger asChild>

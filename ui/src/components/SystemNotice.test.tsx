@@ -126,16 +126,6 @@ describe("SystemNotice", () => {
     expect(node.querySelector("button[aria-expanded]")).toBeNull();
   });
 
-  it("renders compact notices with reduced vertical weight", () => {
-    const node = render(<SystemNotice compact tone="neutral" body="This warning is stale." />);
-
-    const header = node.querySelector("header");
-    const iconWrap = node.querySelector("header span[aria-hidden]");
-    expect(header?.className).toContain("py-1.5");
-    expect(iconWrap?.className).toContain("h-5");
-    expect(node.textContent).toContain("This warning is stale.");
-  });
-
   it("renders typed metadata rows with hrefs when present", () => {
     const node = render(
       <SystemNotice
