@@ -34,6 +34,11 @@ export interface IssueTimelineWorkspace {
   mode: string | null;
 }
 
+export function formatTimelineWorkspaceLabel(workspace: IssueTimelineWorkspace) {
+  const fallbackId = workspace.executionWorkspaceId ?? workspace.projectWorkspaceId;
+  return workspace.label ?? (fallbackId ? fallbackId.slice(0, 8) : "None");
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as Record<string, unknown>;

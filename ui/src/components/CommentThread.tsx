@@ -20,7 +20,7 @@ import { OutputFeedbackButtons } from "./OutputFeedbackButtons";
 import { ApprovalCard } from "./ApprovalCard";
 import { AgentIcon } from "./AgentIconPicker";
 import { formatAssigneeUserLabel } from "../lib/assignees";
-import type { IssueTimelineAssignee, IssueTimelineEvent } from "../lib/issue-timeline-events";
+import { formatTimelineWorkspaceLabel, type IssueTimelineAssignee, type IssueTimelineEvent } from "../lib/issue-timeline-events";
 import { timeAgo } from "../lib/timeAgo";
 import { cn, formatDateTime } from "../lib/utils";
 import { restoreSubmittedCommentDraft } from "../lib/comment-submit-draft";
@@ -199,13 +199,6 @@ function formatTimelineActorName(
     return "System";
   }
   return formatAssigneeUserLabel(actorId, currentUserId) ?? "Board";
-}
-
-function formatTimelineWorkspaceLabel(
-  workspace: NonNullable<IssueTimelineEvent["workspaceChange"]>["from"],
-) {
-  const fallbackId = workspace.executionWorkspaceId ?? workspace.projectWorkspaceId;
-  return workspace.label ?? (fallbackId ? fallbackId.slice(0, 8) : "None");
 }
 
 function initialsForName(name: string) {

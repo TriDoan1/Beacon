@@ -424,11 +424,12 @@ describe("IssueChatThread system notice routing", () => {
       },
       metadata: {
         version: 1,
+        sourceRunId: "run-stale",
         sections: [
           {
             title: "Run evidence",
             rows: [
-              { type: "run_link", label: "Successful run", runId: "run-stale", title: "succeeded" },
+              { type: "run_link", label: "Completed run", runId: "run-stale", title: "succeeded" },
               { type: "key_value", label: "Normalized cause", value: "successful_run_missing_state" },
             ],
           },

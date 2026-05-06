@@ -189,6 +189,13 @@ type WorkspaceNameMaps = {
   executionWorkspaceNames: Map<string, string>;
 };
 
+function emptyWorkspaceNameMaps(): WorkspaceNameMaps {
+  return {
+    projectWorkspaceNames: new Map(),
+    executionWorkspaceNames: new Map(),
+  };
+}
+
 function summarizeIssueWorkspaceForActivity(
   issue: IssueWorkspaceAuditInput,
   names: WorkspaceNameMaps,
@@ -2784,9 +2791,19 @@ export function issueRoutes(
     }
 
     const hasFieldChanges = Object.keys(previous).length > 0;
-    const workspaceChange = hasIssueWorkspaceAuditChange(previous)
-      ? await buildIssueWorkspaceChangeActivityDetails(db, issue.companyId, existing, issue)
-      : null;
+    let workspaceChange = null;
+    if (hasIssueWorkspaceAuditChange(previous)) {
+      try {
+        workspaceChange = await buildIssueWorkspaceChangeActivityDetails(db, issue.companyId, existing, issue);
+      } catch (err) {
+        logger.warn({ err, issueId: issue.id }, "failed to enrich issue workspace change activity details");
+        const fallbackNames = emptyWorkspaceNameMaps();
+        workspaceChange = {
+          from: summarizeIssueWorkspaceForActivity(existing, fallbackNames),
+          to: summarizeIssueWorkspaceForActivity(issue, fallbackNames),
+        };
+      }
+    }
     const reopened =
       commentBody &&
       effectiveMoveToTodoRequested &&

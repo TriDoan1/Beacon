@@ -62,7 +62,7 @@ import type {
 } from "../lib/issue-thread-interactions";
 import { buildIssueThreadInteractionSummary, isIssueThreadInteraction } from "../lib/issue-thread-interactions";
 import { resolveIssueChatTranscriptRuns } from "../lib/issueChatTranscriptRuns";
-import type { IssueTimelineAssignee, IssueTimelineEvent } from "../lib/issue-timeline-events";
+import { formatTimelineWorkspaceLabel, type IssueTimelineAssignee, type IssueTimelineEvent } from "../lib/issue-timeline-events";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -680,13 +680,6 @@ function formatTimelineAssigneeLabel(
     return formatAssigneeUserLabel(assignee.userId, currentUserId, userLabelMap) ?? "Board";
   }
   return "Unassigned";
-}
-
-function formatTimelineWorkspaceLabel(
-  workspace: NonNullable<IssueTimelineEvent["workspaceChange"]>["from"],
-) {
-  const fallbackId = workspace.executionWorkspaceId ?? workspace.projectWorkspaceId;
-  return workspace.label ?? (fallbackId ? fallbackId.slice(0, 8) : "None");
 }
 
 function initialsForName(name: string) {
@@ -1992,13 +1985,10 @@ function issueStatusIsTerminalDisposition(issueStatus: string | undefined) {
 }
 
 function sourceRunIdFromSuccessfulRunHandoffMetadata(metadata: IssueCommentMetadata | null) {
+  if (metadata?.sourceRunId) return metadata.sourceRunId;
   for (const section of metadata?.sections ?? []) {
     for (const row of section.rows) {
-      if (row.type !== "run_link") continue;
-      const label = row.label?.toLowerCase() ?? "";
-      if (label.includes("successful run") || label.includes("source run")) {
-        return row.runId;
-      }
+      if (row.type === "run_link") return row.runId;
     }
   }
   return null;
@@ -2097,6 +2087,23 @@ function StaleDispositionWarningMetadataRow({ row }: { row: SystemNoticeMetadata
   );
 }
 
+function metadataRowKey(row: SystemNoticeMetadataRow) {
+  switch (row.kind) {
+    case "issue":
+      return `issue:${row.label}:${row.identifier}:${row.href ?? ""}:${row.title ?? ""}`;
+    case "agent":
+      return `agent:${row.label}:${row.name}:${row.href ?? ""}`;
+    case "run":
+      return `run:${row.label}:${row.runId}:${row.href ?? ""}:${row.status ?? ""}`;
+    default:
+      return `${row.kind}:${row.label}:${row.value}`;
+  }
+}
+
+function metadataSectionKey(section: SystemNoticeMetadataSection) {
+  return `${section.title ?? "details"}:${section.rows.map(metadataRowKey).join("|")}`;
+}
+
 function StaleDispositionWarningDetails({
   sections,
 }: {
@@ -2108,16 +2115,16 @@ function StaleDispositionWarningDetails({
 
   return (
     <div className="space-y-3 text-left">
-      {sections.map((section, sectionIdx) => (
-        <div key={sectionIdx} className="space-y-1.5">
+      {sections.map((section) => (
+        <div key={metadataSectionKey(section)} className="space-y-1.5">
           {section.title ? (
             <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               {section.title}
             </div>
           ) : null}
           <div className="space-y-1">
-            {section.rows.map((row, rowIdx) => (
-              <StaleDispositionWarningMetadataRow key={rowIdx} row={row} />
+            {section.rows.map((row) => (
+              <StaleDispositionWarningMetadataRow key={metadataRowKey(row)} row={row} />
             ))}
           </div>
         </div>
