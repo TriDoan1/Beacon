@@ -213,7 +213,6 @@ describe("extractIssueTimelineEvents", () => {
         createdAt: new Date("2026-03-31T12:01:00.000Z"),
         actorType: "user",
         actorId: "local-board",
-        runId: null,
         workspaceChange: {
           from: {
             label: "Main workspace",
