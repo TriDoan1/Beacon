@@ -2323,7 +2323,7 @@ export function Inbox() {
                             <Button
                               variant="ghost"
                               size="icon-xs"
-                              className="text-muted-foreground"
+                              className="-mr-2 text-muted-foreground"
                               title={`New issue in ${group.label}`}
                               aria-label={`New issue in ${group.label}`}
                               onClick={(event) => {
