@@ -2631,6 +2631,78 @@ describe("company portability", () => {
     expect(extension).not.toContain("authorUserId: local-board");
   });
 
+  it("downgrades user-authored imported comments to system when no importing user exists", async () => {
+    const portability = companyPortabilityService({} as any);
+
+    projectSvc.list.mockResolvedValue([]);
+    projectSvc.listWorkspaces.mockResolvedValue([]);
+    issueSvc.list.mockResolvedValue([
+      {
+        id: "issue-1",
+        identifier: "PAP-1",
+        title: "Private board note",
+        description: null,
+        projectId: null,
+        projectWorkspaceId: null,
+        assigneeAgentId: null,
+        status: "todo",
+        priority: "medium",
+        labelIds: [],
+        billingCode: null,
+        executionWorkspaceSettings: null,
+        assigneeAdapterOverrides: null,
+      },
+    ]);
+    issueSvc.listComments.mockResolvedValue([
+      {
+        id: "comment-1",
+        issueId: "issue-1",
+        companyId: "company-1",
+        authorType: "user",
+        authorAgentId: null,
+        authorUserId: "local-board",
+        body: "Need private follow-up.",
+        presentation: null,
+        metadata: null,
+        createdAt: new Date("2026-05-04T12:00:00.000Z"),
+        updatedAt: new Date("2026-05-04T12:00:00.000Z"),
+      },
+    ]);
+
+    const exported = await portability.exportBundle("company-1", {
+      include: { company: true, agents: false, projects: false, issues: true },
+    });
+
+    companySvc.create.mockResolvedValue({ id: "company-imported", name: "Imported" });
+    accessSvc.ensureMembership.mockResolvedValue(undefined);
+    agentSvc.list.mockResolvedValue([]);
+    projectSvc.list.mockResolvedValue([]);
+    issueSvc.create.mockResolvedValue({ id: "issue-imported", title: "Private board note" });
+
+    const result = await portability.importBundle({
+      source: { type: "inline", rootPath: exported.rootPath, files: exported.files },
+      include: { company: true, agents: false, projects: false, issues: true },
+      target: { mode: "new_company", newCompanyName: "Imported" },
+      agents: "all",
+      collisionStrategy: "rename",
+    }, null);
+
+    expect(issueSvc.addComment).toHaveBeenCalledWith(
+      "issue-imported",
+      "Need private follow-up.",
+      { agentId: undefined, userId: undefined },
+      {
+        authorType: "system",
+        presentation: null,
+        metadata: null,
+        createdAt: "2026-05-04T12:00:00.000Z",
+      },
+    );
+    expect(result.warnings).toContain(
+      "Comment on task pap-1 was imported as a system comment because no importing user was available.",
+    );
+  });
+
   it("strips root AGENTS frontmatter when importing a nested agent entry path", async () => {
     const portability = companyPortabilityService({} as any);
 
