@@ -464,14 +464,20 @@ describe("IssueChatThread system notice routing", () => {
     expect(row?.textContent).toContain("Stale disposition warning");
     expect(row?.textContent).not.toContain("This disposition warning is stale because the issue now has a newer disposition.");
     expect(row?.textContent).not.toContain("Paperclip needs a disposition before this issue can continue.");
-    expect(container.textContent).not.toContain("run-stale");
 
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const detailsId = toggle.getAttribute("aria-controls");
+    expect(detailsId).toBeTruthy();
+    const details = detailsId ? container.ownerDocument.getElementById(detailsId) : null;
+    expect(details).not.toBeNull();
+    expect(details?.textContent).toContain("run-stale");
+    expect(details).toHaveProperty("hidden", true);
     act(() => {
       toggle.click();
     });
 
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(details).toHaveProperty("hidden", false);
     expect(container.textContent).toContain("run-stale");
   });
 });

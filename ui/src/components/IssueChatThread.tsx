@@ -62,7 +62,12 @@ import type {
 } from "../lib/issue-thread-interactions";
 import { buildIssueThreadInteractionSummary, isIssueThreadInteraction } from "../lib/issue-thread-interactions";
 import { resolveIssueChatTranscriptRuns } from "../lib/issueChatTranscriptRuns";
-import { formatTimelineWorkspaceLabel, type IssueTimelineAssignee, type IssueTimelineEvent } from "../lib/issue-timeline-events";
+import {
+  formatTimelineWorkspaceLabel,
+  type IssueTimelineAssignee,
+  type IssueTimelineEvent,
+  type IssueTimelineWorkspace,
+} from "../lib/issue-timeline-events";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -2104,6 +2109,25 @@ function metadataSectionKey(section: SystemNoticeMetadataSection) {
   return `${section.title ?? "details"}:${section.rows.map(metadataRowKey).join("|")}`;
 }
 
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isTimelineWorkspace(value: unknown): value is IssueTimelineWorkspace {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const workspace = value as Record<string, unknown>;
+  return isNullableString(workspace.label)
+    && isNullableString(workspace.projectWorkspaceId)
+    && isNullableString(workspace.executionWorkspaceId)
+    && isNullableString(workspace.mode);
+}
+
+function isTimelineWorkspaceChange(value: unknown): value is NonNullable<IssueTimelineEvent["workspaceChange"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const change = value as Record<string, unknown>;
+  return isTimelineWorkspace(change.from) && isTimelineWorkspace(change.to);
+}
+
 function StaleDispositionWarningDetails({
   sections,
 }: {
@@ -2172,11 +2196,9 @@ function StaleDispositionWarningRow({
               <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground/40 transition-transform", open && "rotate-180")} />
             </span>
           </button>
-          {open ? (
-            <div id={detailsId} className="space-y-1 py-1">
-              <StaleDispositionWarningDetails sections={sections} />
-            </div>
-          ) : null}
+          <div id={detailsId} hidden={!open} className="space-y-1 py-1">
+            <StaleDispositionWarningDetails sections={sections} />
+          </div>
         </div>
       </div>
     </div>
@@ -2338,9 +2360,7 @@ function IssueChatSystemMessage({ message }: { message: ThreadMessage }) {
         to: IssueTimelineAssignee;
       }
     : null;
-  const workspaceChange = typeof custom.workspaceChange === "object" && custom.workspaceChange
-    ? custom.workspaceChange as NonNullable<IssueTimelineEvent["workspaceChange"]>
-    : null;
+  const workspaceChange = isTimelineWorkspaceChange(custom.workspaceChange) ? custom.workspaceChange : null;
   const interaction = isIssueThreadInteraction(custom.interaction)
     ? custom.interaction
     : null;
