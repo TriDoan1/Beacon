@@ -7,7 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IssueChatThread } from "./IssueChatThread";
 import type { IssueChatComment } from "../lib/issue-chat-messages";
-import type { Agent } from "@paperclipai/shared";
+import type { Agent, SuccessfulRunHandoffState } from "@paperclipai/shared";
 
 vi.mock("@assistant-ui/react", () => ({
   AssistantRuntimeProvider: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -70,7 +70,14 @@ afterEach(() => {
   container.remove();
 });
 
-function renderThread(comments: IssueChatComment[], agentMap?: Map<string, Agent>) {
+function renderThread(
+  comments: IssueChatComment[],
+  options: {
+    agentMap?: Map<string, Agent>;
+    issueStatus?: string;
+    successfulRunHandoff?: SuccessfulRunHandoffState | null;
+  } = {},
+) {
   act(() => {
     root.render(
       <MemoryRouter>
@@ -82,7 +89,9 @@ function renderThread(comments: IssueChatComment[], agentMap?: Map<string, Agent
           onAdd={async () => {}}
           showComposer={false}
           enableLiveTranscriptPolling={false}
-          agentMap={agentMap}
+          agentMap={options.agentMap}
+          issueStatus={options.issueStatus}
+          successfulRunHandoff={options.successfulRunHandoff}
         />
       </MemoryRouter>,
     );
@@ -265,7 +274,7 @@ describe("IssueChatThread system notice routing", () => {
       ...baseTimestamps,
     };
 
-    renderThread([comment], agentMap);
+    renderThread([comment], { agentMap });
 
     const status = container.querySelector('[role="status"]');
     expect(status).not.toBeNull();
@@ -394,5 +403,59 @@ describe("IssueChatThread system notice routing", () => {
 
     expect(container.querySelector('[role="status"]')).toBeNull();
     expect(container.querySelector('[data-message-role="assistant"]')).not.toBeNull();
+  });
+
+  it("folds stale successful-run disposition warnings into a compact neutral notice", () => {
+    const comment: IssueChatComment = {
+      id: "comment-stale-disposition-warning",
+      companyId: "company-1",
+      issueId: "issue-1",
+      authorType: "system",
+      authorAgentId: null,
+      authorUserId: null,
+      runId: "run-stale",
+      runAgentId: "agent-codex",
+      body: "Paperclip needs a disposition before this issue can continue.",
+      presentation: {
+        kind: "system_notice",
+        tone: "warning",
+        title: "Missing issue disposition",
+        detailsDefaultOpen: false,
+      },
+      metadata: {
+        version: 1,
+        sections: [
+          {
+            title: "Run evidence",
+            rows: [
+              { type: "run_link", label: "Successful run", runId: "run-stale", title: "succeeded" },
+              { type: "key_value", label: "Normalized cause", value: "successful_run_missing_state" },
+            ],
+          },
+        ],
+      },
+      ...baseTimestamps,
+    };
+
+    renderThread([comment], {
+      issueStatus: "done",
+      successfulRunHandoff: {
+        state: "resolved",
+        required: false,
+        sourceRunId: "run-stale",
+        correctiveRunId: "run-corrective",
+        assigneeAgentId: "agent-codex",
+        detectedProgressSummary: null,
+        createdAt: new Date("2026-05-04T17:00:00.000Z"),
+      },
+    });
+
+    const status = container.querySelector('[role="status"]');
+    expect(status?.getAttribute("aria-label")).toBe("Stale disposition warning");
+    expect(status?.textContent).toContain("This disposition warning is stale");
+    expect(status?.textContent).not.toContain("Paperclip needs a disposition before this issue can continue.");
+    expect(status?.querySelector("header")?.className).toContain("py-1.5");
+    expect(container.textContent).not.toContain("run-stale");
+    expect(status?.querySelector("button[aria-expanded]")?.getAttribute("aria-expanded")).toBe("false");
   });
 });

@@ -36,6 +36,8 @@ export type SystemNoticeProps = {
   metadata?: SystemNoticeMetadataSection[];
   /** Force the details panel open initially. Defaults to false (collapsed). */
   detailsDefaultOpen?: boolean;
+  /** Reduce visual weight for inactive historical notices. */
+  compact?: boolean;
   /** Optional ISO timestamp shown next to the label. */
   timestamp?: string;
   className?: string;
@@ -213,6 +215,7 @@ export function SystemNotice({
   source,
   metadata,
   detailsDefaultOpen = false,
+  compact = false,
   timestamp,
   className,
 }: SystemNoticeProps) {
@@ -241,15 +244,19 @@ export function SystemNotice({
         className,
       )}
     >
-      <header className="flex items-start gap-3 px-3 py-2.5 sm:px-4">
+      <header className={cn(
+        "flex items-start gap-3 px-3 sm:px-4",
+        compact ? "py-1.5" : "py-2.5",
+      )}>
         <span
           className={cn(
-            "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+            "mt-0.5 flex shrink-0 items-center justify-center rounded-md",
+            compact ? "h-5 w-5" : "h-7 w-7",
             tokens.iconWrap,
           )}
           aria-hidden
         >
-          <ToneIcon className={cn("h-4 w-4", tokens.iconClass)} />
+          <ToneIcon className={cn(compact ? "h-3.5 w-3.5" : "h-4 w-4", tokens.iconClass)} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-semibold uppercase tracking-[0.14em]">
@@ -280,7 +287,10 @@ export function SystemNotice({
               </>
             ) : null}
           </div>
-          <div className="mt-1 break-words text-[14px] leading-6 text-foreground">{body}</div>
+          <div className={cn(
+            "break-words text-foreground",
+            compact ? "mt-0.5 text-[13px] leading-5 text-muted-foreground" : "mt-1 text-[14px] leading-6",
+          )}>{body}</div>
         </div>
         {hasDetails ? (
           <button

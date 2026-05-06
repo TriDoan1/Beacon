@@ -155,11 +155,15 @@ interface IssueChatMessageContext {
   onCancelInteraction?: (
     interaction: AskUserQuestionsInteraction,
   ) => Promise<void> | void;
+  issueStatus?: string;
+  successfulRunHandoff?: SuccessfulRunHandoffState | null;
 }
 
 const IssueChatCtx = createContext<IssueChatMessageContext>({
   feedbackDataSharingPreference: "prompt",
   feedbackTermsUrl: null,
+  issueStatus: undefined,
+  successfulRunHandoff: null,
 });
 
 export function resolveAssistantMessageFoldedState(args: {
@@ -1975,6 +1979,48 @@ function isIssueCommentMetadata(value: unknown): value is IssueCommentMetadata {
   return v.version === 1 && Array.isArray(v.sections);
 }
 
+function issueStatusIsTerminalDisposition(issueStatus: string | undefined) {
+  return issueStatus === "done" || issueStatus === "cancelled";
+}
+
+function sourceRunIdFromSuccessfulRunHandoffMetadata(metadata: IssueCommentMetadata | null) {
+  for (const section of metadata?.sections ?? []) {
+    for (const row of section.rows) {
+      if (row.type !== "run_link") continue;
+      const label = row.label?.toLowerCase() ?? "";
+      if (label.includes("successful run") || label.includes("source run")) {
+        return row.runId;
+      }
+    }
+  }
+  return null;
+}
+
+function isStaleSuccessfulRunHandoffNotice(input: {
+  bodyText: string;
+  issueStatus?: string;
+  successfulRunHandoff?: SuccessfulRunHandoffState | null;
+  runId?: string | null;
+  metadata: IssueCommentMetadata | null;
+}) {
+  if (!isSuccessfulRunHandoffComment(input.bodyText)) return false;
+
+  const currentHandoff = input.successfulRunHandoff ?? null;
+  if (currentHandoff?.state === "resolved") return true;
+  if (issueStatusIsTerminalDisposition(input.issueStatus)) return true;
+
+  const noticeSourceRunId = sourceRunIdFromSuccessfulRunHandoffMetadata(input.metadata) ?? input.runId ?? null;
+  if (
+    noticeSourceRunId
+    && currentHandoff?.sourceRunId
+    && noticeSourceRunId !== currentHandoff.sourceRunId
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function SystemNoticeCommentRow({
   message,
   anchorId,
@@ -1982,7 +2028,7 @@ function SystemNoticeCommentRow({
   message: ThreadMessage;
   anchorId?: string;
 }) {
-  const { onImageClick, agentMap } = useContext(IssueChatCtx);
+  const { onImageClick, agentMap, issueStatus, successfulRunHandoff } = useContext(IssueChatCtx);
   const custom = message.metadata.custom as Record<string, unknown>;
   const presentation = isIssueCommentPresentation(custom.presentation) ? custom.presentation : null;
   const commentMetadata = isIssueCommentMetadata(custom.commentMetadata) ? custom.commentMetadata : null;
@@ -1994,6 +2040,13 @@ function SystemNoticeCommentRow({
     .filter((p): p is { type: "text"; text: string } => p.type === "text")
     .map((p) => p.text)
     .join("\n\n");
+  const staleSuccessfulRunHandoffNotice = isStaleSuccessfulRunHandoffNotice({
+    bodyText,
+    issueStatus,
+    successfulRunHandoff,
+    runId,
+    metadata: commentMetadata,
+  });
   const [copied, setCopied] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -2012,9 +2065,18 @@ function SystemNoticeCommentRow({
   })();
 
   const props = buildSystemNoticeProps({
-    presentation,
+    presentation: staleSuccessfulRunHandoffNotice
+      ? {
+          kind: "system_notice",
+          tone: "neutral",
+          title: "Stale disposition warning",
+          detailsDefaultOpen: false,
+        }
+      : presentation,
     metadata: commentMetadata,
-    body: (
+    body: staleSuccessfulRunHandoffNotice ? (
+      <span>This disposition warning is stale because the issue now has a newer disposition.</span>
+    ) : (
       <MarkdownBody className="text-sm leading-6" softBreaks onImageClick={onImageClick}>
         {bodyText}
       </MarkdownBody>
@@ -2043,7 +2105,7 @@ function SystemNoticeCommentRow({
   return (
     <div id={anchorId} className="group">
       <div className="py-1">
-        <SystemNotice {...props} />
+        <SystemNotice {...props} compact={staleSuccessfulRunHandoffNotice} />
         <div className="mt-1 flex items-center justify-end gap-1.5 px-1 opacity-0 transition-opacity group-hover:opacity-100">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -3880,6 +3942,8 @@ export function IssueChatThread({
       onRejectInteraction: stableOnRejectInteraction,
       onSubmitInteractionAnswers: stableOnSubmitInteractionAnswers,
       onCancelInteraction: stableOnCancelInteraction,
+      issueStatus,
+      successfulRunHandoff,
     }),
     [
       feedbackDataSharingPreference,
@@ -3900,6 +3964,8 @@ export function IssueChatThread({
       stableOnRejectInteraction,
       stableOnSubmitInteractionAnswers,
       stableOnCancelInteraction,
+      issueStatus,
+      successfulRunHandoff,
     ],
   );
 
