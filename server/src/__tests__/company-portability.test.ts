@@ -2343,7 +2343,7 @@ describe("company portability", () => {
     expect(materializedFiles["AGENTS.md"]).not.toContain('name: "ClaudeCoder"');
   });
 
-  it("adds local adapter permission bypass defaults on import", async () => {
+  it("does not implicitly add local adapter permission bypass defaults on import", async () => {
     const portability = companyPortabilityService({} as any);
 
     companySvc.create.mockResolvedValue({
@@ -2389,12 +2389,9 @@ describe("company portability", () => {
       collisionStrategy: "rename",
     }, "user-1");
 
-    expect(agentSvc.create).toHaveBeenCalledWith("company-imported", expect.objectContaining({
-      adapterType: "claude_local",
-      adapterConfig: expect.objectContaining({
-        dangerouslySkipPermissions: true,
-      }),
-    }));
+    const firstCreateInput = agentSvc.create.mock.calls[0]?.[1] as Record<string, any>;
+    expect(firstCreateInput?.adapterConfig).toBeTruthy();
+    expect(firstCreateInput.adapterConfig?.dangerouslySkipPermissions).toBeUndefined();
 
     await portability.importBundle({
       source: {
@@ -2432,11 +2429,9 @@ describe("company portability", () => {
         args: ["--legacy-arg"],
       }),
     }));
-    expect(agentSvc.create).toHaveBeenLastCalledWith("company-imported", expect.objectContaining({
-      adapterConfig: expect.objectContaining({
-        dangerouslyBypassApprovalsAndSandbox: true,
-      }),
-    }));
+    const lastCreateInput = agentSvc.create.mock.calls.at(-1)?.[1] as Record<string, any>;
+    expect(lastCreateInput?.adapterConfig).toBeTruthy();
+    expect(lastCreateInput.adapterConfig?.dangerouslyBypassApprovalsAndSandbox).toBeUndefined();
   });
 
   it("preserves issue labelIds through export and import round-trip", async () => {
@@ -2873,9 +2868,7 @@ describe("company portability", () => {
 
     expect(secretSvc.normalizeAdapterConfigForPersistence).toHaveBeenCalledWith(
       "company-imported",
-      expect.objectContaining({
-        dangerouslySkipPermissions: true,
-      }),
+      expect.anything(),
       { strictMode: false },
     );
     expect(agentSvc.create).toHaveBeenCalledWith("company-imported", expect.objectContaining({
@@ -2943,7 +2936,6 @@ describe("company portability", () => {
       "company-1",
       expect.objectContaining({
         model: "gpt-5.4",
-        dangerouslyBypassApprovalsAndSandbox: true,
         extraArgs: ["--skip-git-repo-check"],
       }),
       { strictMode: false },
