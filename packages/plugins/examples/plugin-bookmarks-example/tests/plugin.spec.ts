@@ -33,7 +33,8 @@ function makeInMemoryBookmarksDb() {
       let filtered = rows.filter((row) => row.company_id === companyId);
       if (sql.includes("LIKE $2")) {
         const like = (params?.[1] as string) ?? "";
-        const needle = like.replace(/%/g, "").toLowerCase();
+        const inner = like.startsWith("%") && like.endsWith("%") ? like.slice(1, -1) : like;
+        const needle = inner.replace(/\\(.)/g, "$1").toLowerCase();
         filtered = filtered.filter((row) =>
           row.title.toLowerCase().includes(needle) ||
           row.url.toLowerCase().includes(needle) ||
@@ -86,11 +87,31 @@ function makeInMemoryBookmarksDb() {
   };
 }
 
+interface RecordedFolderWrite {
+  companyId: string;
+  folderKey: string;
+  relativePath: string;
+  contents: string;
+}
+
 function makeHarness() {
   const harness = createTestHarness({ manifest });
   const db = makeInMemoryBookmarksDb();
   harness.ctx.db = db;
-  return { harness, db };
+  const folderWrites: RecordedFolderWrite[] = [];
+  const baseWriteTextAtomic = harness.ctx.localFolders.writeTextAtomic.bind(
+    harness.ctx.localFolders,
+  );
+  harness.ctx.localFolders.writeTextAtomic = async (
+    companyId,
+    folderKey,
+    relativePath,
+    contents,
+  ) => {
+    folderWrites.push({ companyId, folderKey, relativePath, contents });
+    return baseWriteTextAtomic(companyId, folderKey, relativePath, contents);
+  };
+  return { harness, db, folderWrites };
 }
 
 describe("plugin-bookmarks-example manifest", () => {
@@ -245,6 +266,99 @@ describe("plugin-bookmarks-example worker", () => {
 
     const after = await harness.getData<BookmarkListResult>("list", { companyId });
     expect(after.bookmarks.map((b) => b.slug)).toEqual(["example-one"]);
+  });
+
+  it("tombstones the markdown sidecar when a bookmark is deleted", async () => {
+    const companyId = "99999999-9999-9999-9999-999999999999";
+    const { harness, folderWrites } = makeHarness();
+    await plugin.definition.setup(harness.ctx);
+
+    await harness.performAction<BookmarkRecord>("create", {
+      companyId,
+      url: "https://example.com/del",
+      title: "Will be removed",
+    });
+    folderWrites.length = 0;
+
+    await harness.performAction<{ deleted: boolean; slug: string }>("delete", {
+      companyId,
+      slug: "will-be-removed",
+    });
+
+    expect(folderWrites).toHaveLength(1);
+    const tombstone = folderWrites[0]!;
+    expect(tombstone.relativePath).toBe("bookmarks/will-be-removed.md");
+    expect(tombstone.contents).toContain("deleted: true");
+    expect(tombstone.contents).toContain("slug: will-be-removed");
+  });
+
+  it("does not tombstone when no row matched the slug", async () => {
+    const companyId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const { harness, folderWrites } = makeHarness();
+    await plugin.definition.setup(harness.ctx);
+    folderWrites.length = 0;
+
+    const result = await harness.performAction<{ deleted: boolean; slug: string }>(
+      "delete",
+      { companyId, slug: "missing" },
+    );
+    expect(result.deleted).toBe(false);
+    expect(folderWrites).toEqual([]);
+  });
+
+  it("treats LIKE wildcards in search input as literals", async () => {
+    const companyId = "77777777-7777-7777-7777-777777777777";
+    const { harness } = makeHarness();
+    await plugin.definition.setup(harness.ctx);
+
+    await harness.performAction<BookmarkRecord>("create", {
+      companyId,
+      url: "https://example.com/100-percent",
+      title: "100% complete",
+    });
+    await harness.performAction<BookmarkRecord>("create", {
+      companyId,
+      url: "https://example.com/other",
+      title: "Other entry",
+    });
+
+    const matchingPercent = await harness.getData<BookmarkListResult>("list", {
+      companyId,
+      search: "100%",
+    });
+    expect(matchingPercent.bookmarks.map((b) => b.slug)).toEqual(["100-complete"]);
+
+    const matchingUnderscore = await harness.getData<BookmarkListResult>("list", {
+      companyId,
+      search: "_",
+    });
+    expect(matchingUnderscore.bookmarks).toEqual([]);
+  });
+
+  it("caps tag count exactly at MAX_TAGS without holding an oversized array", async () => {
+    const companyId = "88888888-8888-8888-8888-888888888888";
+    const { harness, db } = makeHarness();
+    await plugin.definition.setup(harness.ctx);
+
+    const sixteenTags = Array.from({ length: 16 }, (_, i) => `t${i}`);
+    const created = await harness.performAction<BookmarkRecord>("create", {
+      companyId,
+      url: "https://example.com/tags",
+      title: "tagged",
+      tags: sixteenTags,
+    });
+    expect(created.tags).toHaveLength(16);
+
+    await expect(
+      harness.performAction("create", {
+        companyId,
+        url: "https://example.com/too-many",
+        title: "too-many",
+        tags: [...sixteenTags, "extra"],
+      }),
+    ).rejects.toThrow(/at most 16 tags/);
+
+    expect(db.rows).toHaveLength(1);
   });
 
   it("rejects URLs without an http(s) scheme", async () => {

@@ -105,13 +105,17 @@ function normalizeTags(value: unknown): string[] {
       throw new Error(`tag "${entry}" must use lowercase letters, digits, hyphens, or underscores`);
     }
     if (seen.has(cleaned)) continue;
-    seen.add(cleaned);
-    tags.push(cleaned);
-    if (tags.length > MAX_TAGS) {
+    if (tags.length >= MAX_TAGS) {
       throw new Error(`bookmarks accept at most ${MAX_TAGS} tags`);
     }
+    seen.add(cleaned);
+    tags.push(cleaned);
   }
   return tags;
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
 export function deriveSlugCandidate(url: string, title: string | null): string {
@@ -217,9 +221,12 @@ async function listBookmarks(
   const params: unknown[] = [companyId];
   let where = "company_id = $1";
   if (search) {
-    params.push(`%${search.toLowerCase()}%`);
+    params.push(`%${escapeLikePattern(search.toLowerCase())}%`);
     const idx = params.length;
-    where += ` AND (lower(title) LIKE $${idx} OR lower(url) LIKE $${idx} OR lower(notes) LIKE $${idx})`;
+    where +=
+      ` AND (lower(title) LIKE $${idx} ESCAPE '\\'` +
+      ` OR lower(url) LIKE $${idx} ESCAPE '\\'` +
+      ` OR lower(notes) LIKE $${idx} ESCAPE '\\')`;
   }
   if (tag) {
     params.push(tag);
@@ -305,7 +312,40 @@ export async function deleteBookmark(
     `DELETE FROM ${tableName(ctx.db.namespace)} WHERE company_id = $1 AND slug = $2`,
     [companyId, slug],
   );
+  if (result.rowCount > 0) {
+    // The current PluginLocalFoldersClient surface (declarations / configure /
+    // status / list / readText / writeTextAtomic) does not expose a remove
+    // primitive, so we cannot atomically delete the markdown sidecar from the
+    // local folder when the row is removed. Overwrite the file with a
+    // tombstone marker instead so operators pointing the folder at a
+    // version-controlled directory can see the deletion without accumulating
+    // unbounded ghost files. The DB row remains the source of truth.
+    try {
+      await ctx.localFolders.writeTextAtomic(
+        companyId,
+        BOOKMARKS_FOLDER_KEY,
+        bookmarkFilePath(slug),
+        renderTombstoneMarkdown(slug),
+      );
+    } catch (error) {
+      ctx.logger.warn("Failed to tombstone bookmark sidecar after delete", {
+        slug,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   return { deleted: result.rowCount > 0, slug };
+}
+
+function renderTombstoneMarkdown(slug: string): string {
+  return [
+    "---",
+    `slug: ${slug}`,
+    "deleted: true",
+    `deleted_at: ${new Date().toISOString()}`,
+    "---",
+    "",
+  ].join("\n");
 }
 
 let listHandler: ((companyId: string, search: string | null, tag: string | null, limit: number) => Promise<BookmarkListResult>) | null = null;
