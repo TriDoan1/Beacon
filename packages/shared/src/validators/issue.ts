@@ -238,6 +238,10 @@ const createIssueBaseSchema = z.object({
   labelIds: z.array(z.string().uuid()).optional(),
 });
 
+export const createIssueInputSchema = createIssueBaseSchema.extend({
+  status: createIssueBaseSchema.shape.status.optional(),
+});
+
 export const createIssueSchema = withCreateIssueStatusDefault(createIssueBaseSchema);
 
 export type CreateIssue = z.infer<typeof createIssueSchema>;

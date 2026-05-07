@@ -715,6 +715,7 @@ export {
   COMPANY_SEARCH_MAX_TOKENS,
   type CompanySearchQuery,
   createIssueSchema,
+  createIssueInputSchema,
   createChildIssueSchema,
   resolveCreateIssueStatusDefault,
   createIssueLabelSchema,
