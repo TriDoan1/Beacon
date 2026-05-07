@@ -12,6 +12,8 @@ packages:
   # Same treatment for the bookmarks example: published as a bundled plugin,
   # not a workspace importer, so its pnpm-lock.yaml entries are managed by CI.
   - "!packages/plugins/examples/plugin-bookmarks-example"
+  # Same treatment for the quick-notes example.
+  - "!packages/plugins/examples/plugin-quick-notes-example"
   - server
   - ui
   - cli
