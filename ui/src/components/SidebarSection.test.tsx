@@ -6,10 +6,18 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarSection } from "./SidebarSection";
 
+const sidebarState = vi.hoisted(() => ({
+  isMobile: false,
+}));
+
 vi.mock("@/lib/router", () => ({
   Link: ({ children, to, ...props }: { children: ReactNode; to: string }) => (
     <a href={to} {...props}>{children}</a>
   ),
+}));
+
+vi.mock("../context/SidebarContext", () => ({
+  useSidebar: () => sidebarState,
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,6 +51,7 @@ describe("SidebarSection", () => {
   let root: ReturnType<typeof createRoot> | null;
 
   beforeEach(() => {
+    sidebarState.isMobile = false;
     container = document.createElement("div");
     document.body.appendChild(container);
     root = null;
@@ -145,5 +154,37 @@ describe("SidebarSection", () => {
       reopenedNewProjectItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps section header controls visible on mobile", async () => {
+    sidebarState.isMobile = true;
+    const currentRoot = createRoot(container);
+    root = currentRoot;
+
+    await act(async () => {
+      currentRoot.render(
+        <SidebarSection
+          label="Projects"
+          collapsible={{ open: false, onOpenChange: vi.fn() }}
+          menu={{
+            ariaLabel: "Projects section actions",
+            actions: [{ type: "item", label: "New project" }],
+          }}
+        >
+          <a href="/projects">Projects</a>
+        </SidebarSection>,
+      );
+    });
+    await flushReact();
+
+    const projectsLabel = Array.from(container.querySelectorAll("span"))
+      .find((element) => element.textContent === "Projects");
+    const caret = projectsLabel?.previousElementSibling;
+    const trigger = container.querySelector('button[aria-label="Projects section actions"]');
+
+    expect(caret?.getAttribute("class")).toContain("opacity-100");
+    expect(caret?.getAttribute("class")).not.toContain("opacity-0");
+    expect(trigger?.getAttribute("class")).toContain("opacity-100");
+    expect(trigger?.getAttribute("class")).not.toContain("opacity-0");
   });
 });

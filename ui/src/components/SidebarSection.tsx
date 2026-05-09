@@ -2,6 +2,7 @@ import { useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "@/lib/router";
 import { ChevronRight, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSidebar } from "../context/SidebarContext";
 import {
   Collapsible,
   CollapsibleContent,
@@ -59,11 +60,16 @@ function SidebarSectionHeader({
   label,
   menu,
 }: Pick<SidebarSectionProps, "collapsible" | "label" | "menu">) {
+  const { isMobile } = useSidebar();
   const [menuOpen, setMenuOpen] = useState(false);
   const hasMenu = Boolean(menu && ((menu.actions?.length ?? 0) > 0 || (menu.radioChoices?.length ?? 0) > 0));
   const labelClassName = "text-[10px] font-medium uppercase tracking-widest font-mono text-muted-foreground/60";
+  const headerControlVisibilityClassName = isMobile
+    ? "opacity-100"
+    : "opacity-0 group-hover/sidebar-section:opacity-100 group-focus-within/sidebar-section:opacity-100";
   const caretClassName = cn(
-    "h-3 w-3 shrink-0 text-muted-foreground/60 opacity-0 transition-all group-hover/sidebar-section:opacity-100 group-focus-within/sidebar-section:opacity-100",
+    "h-3 w-3 shrink-0 text-muted-foreground/60 transition-all",
+    headerControlVisibilityClassName,
     collapsible?.open && "rotate-90",
     menuOpen && "opacity-100",
   );
@@ -97,7 +103,7 @@ function SidebarSectionHeader({
               size="icon-xs"
               className={cn(
                 "h-5 w-5 text-muted-foreground/60 transition-opacity hover:text-foreground data-[state=open]:opacity-100",
-                "opacity-0 group-hover/sidebar-section:opacity-100 group-focus-within/sidebar-section:opacity-100",
+                headerControlVisibilityClassName,
               )}
               aria-label={menu?.ariaLabel ?? `${label} actions`}
             >
