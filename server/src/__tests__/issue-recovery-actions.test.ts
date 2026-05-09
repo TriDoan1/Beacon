@@ -199,6 +199,62 @@ describeEmbeddedPostgres("issue recovery actions", () => {
     });
   });
 
+  it("reuses the same source-scoped action when latest run IDs change while the cause stays the same", async () => {
+    const { companyId, managerId, coderId, sourceIssue } = await seedCompany();
+    const enqueueWakeup = vi.fn(async () => null);
+    const recovery = recoveryService(db, { enqueueWakeup });
+    const firstLatestRun = {
+      id: randomUUID(),
+      agentId: coderId,
+      status: "failed",
+      error: "adapter failed",
+      errorCode: "adapter_failed",
+      contextSnapshot: { retryReason: "issue_continuation_needed" },
+      livenessState: "needs_followup",
+    } as const;
+    const secondLatestRun = {
+      ...firstLatestRun,
+      id: randomUUID(),
+    };
+
+    await recovery.escalateStrandedAssignedIssue({
+      issue: sourceIssue,
+      previousStatus: "in_progress",
+      latestRun: firstLatestRun,
+      comment: "Automatic continuation recovery failed.",
+    });
+    await recovery.escalateStrandedAssignedIssue({
+      issue: sourceIssue,
+      previousStatus: "in_progress",
+      latestRun: secondLatestRun,
+      comment: "Automatic continuation recovery failed.",
+    });
+
+    const actionRows = await db
+      .select()
+      .from(issueRecoveryActions)
+      .where(eq(issueRecoveryActions.sourceIssueId, sourceIssue.id));
+    expect(actionRows).toHaveLength(1);
+    expect(actionRows[0]).toMatchObject({
+      companyId,
+      kind: "stranded_assigned_issue",
+      status: "active",
+      ownerAgentId: managerId,
+      previousOwnerAgentId: coderId,
+      returnOwnerAgentId: coderId,
+      cause: "stranded_assigned_issue",
+      attemptCount: 2,
+    });
+    expect(actionRows[0]?.evidence).toMatchObject({ latestRunId: secondLatestRun.id });
+    expect(enqueueWakeup).toHaveBeenCalledTimes(2);
+    expect(enqueueWakeup.mock.calls[1]?.[1]?.payload).toMatchObject({
+      issueId: sourceIssue.id,
+      sourceIssueId: sourceIssue.id,
+      strandedRunId: secondLatestRun.id,
+      recoveryCause: "stranded_assigned_issue",
+    });
+  });
+
   it("does not create nested recovery artifacts when issue-backed fallback work itself fails", async () => {
     const { companyId, managerId, sourceIssueId, prefix } = await seedCompany();
     const recoveryIssueId = randomUUID();

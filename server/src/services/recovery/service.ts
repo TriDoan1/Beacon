@@ -1549,13 +1549,11 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     latestRun: LatestIssueRun;
     successfulRunHandoffEvidence?: SuccessfulRunHandoffRecoveryEvidence | null;
   }) {
-    const sourceRunId = input.successfulRunHandoffEvidence?.sourceRunId ?? input.latestRun?.id ?? "no-run";
     return [
       "source_scoped_recovery",
       input.issue.companyId,
       input.issue.id,
       input.recoveryCause,
-      sourceRunId,
     ].join(":");
   }
 
