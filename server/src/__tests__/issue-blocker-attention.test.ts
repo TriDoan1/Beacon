@@ -538,6 +538,45 @@ describeEmbeddedPostgres("issue blocker attention", () => {
     await expect(svc.count(companyId, { attention: "blocked" })).resolves.toBe(1);
   });
 
+  it("redacts external wait details from blocked inbox payloads and search", async () => {
+    const { companyId } = await createCompany("BIX");
+    const owner = "Private Vendor Security Team";
+    const action = "Send the confidential access token for customer Alpha";
+    const issueId = await insertIssue({
+      companyId,
+      identifier: "BIX-1",
+      title: "Blocked on vendor",
+      status: "blocked",
+      description: [
+        "Public context stays visible.",
+        `external owner: ${owner}`,
+        `external action: ${action}`,
+        "Continue after the vendor confirms receipt.",
+      ].join("\n"),
+    });
+
+    const rows = await svc.list(companyId, { attention: "blocked" });
+    const issue = rows.find((row) => row.id === issueId);
+
+    expect(issue?.description).toContain("Public context stays visible.");
+    expect(issue?.description).toContain("Continue after the vendor confirms receipt.");
+    expect(issue?.description).not.toContain(owner);
+    expect(issue?.description).not.toContain(action);
+    expect(issue?.blockedInboxAttention).toMatchObject({
+      state: "external_wait",
+      reason: "external_owner_action",
+      owner: { type: "external", label: null },
+      action: { label: "External owner action", detail: null },
+      redaction: { externalDetailsRedacted: true, secretFieldsOmitted: true },
+    });
+    expect(JSON.stringify(issue?.blockedInboxAttention)).not.toContain(owner);
+    expect(JSON.stringify(issue?.blockedInboxAttention)).not.toContain(action);
+
+    await expect(svc.list(companyId, { attention: "blocked", q: owner })).resolves.toEqual([]);
+    await expect(svc.count(companyId, { attention: "blocked", q: action })).resolves.toBe(0);
+    await expect(svc.count(companyId, { attention: "blocked", q: "Public context" })).resolves.toBe(1);
+  });
+
   it("excludes healthy active blockers from blocked inbox attention", async () => {
     const { companyId, agentId } = await createCompany("BIB");
     const parentId = await insertIssue({ companyId, identifier: "BIB-1", title: "Blocked source", status: "blocked" });

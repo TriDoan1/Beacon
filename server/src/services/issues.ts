@@ -1873,11 +1873,39 @@ function externalWaitFromDescription(description: string | null): { owner: strin
   };
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function redactExternalWaitDescription(
+  description: string | null | undefined,
+  external: { owner: string; action: string } | null,
+) {
+  if (!description) return null;
+  let redacted = description
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*external\s+(?:owner|action)\s*:/i.test(line))
+    .join("\n");
+
+  for (const value of [external?.owner, external?.action]) {
+    if (!value) continue;
+    redacted = redacted.replace(new RegExp(escapeRegExp(value), "gi"), "[redacted external wait detail]");
+  }
+
+  redacted = redacted.replace(/\n{3,}/g, "\n\n").trim();
+  return redacted.length > 0 ? redacted : null;
+}
+
+function blockedInboxResponseDescription(attention: IssueBlockedInboxAttention, row: BlockedInboxIssueRow) {
+  if (!attention.redaction.externalDetailsRedacted) return row.description;
+  return redactExternalWaitDescription(row.description, externalWaitFromDescription(row.description));
+}
+
 function blockedInboxSearchText(attention: IssueBlockedInboxAttention, row: BlockedInboxIssueRow) {
   return [
     row.identifier,
     row.title,
-    row.description,
+    blockedInboxResponseDescription(attention, row),
     attention.sourceIssue?.identifier,
     attention.sourceIssue?.title,
     attention.leafIssue?.identifier,
@@ -2318,10 +2346,10 @@ async function listIssueBlockedInboxAttentionMap(
         reason: "external_owner_action",
         severity: "medium",
         stoppedSinceAt: row.updatedAt,
-        owner: { type: "external", agentId: null, userId: null, label: external.owner },
+        owner: { type: "external", agentId: null, userId: null, label: null },
         action: {
           label: "External owner action",
-          detail: external.action,
+          detail: null,
         },
         sourceIssue: source,
         externalDetailsRedacted: true,
@@ -2500,6 +2528,7 @@ async function listBlockedInboxIssues(
     ) ?? row.updatedAt;
     return [{
       ...row,
+      description: blockedInboxResponseDescription(blockedInboxAttention, row),
       blockedBy: blockedByMap.get(row.id) ?? [],
       lastActivityAt,
       ...(blockerAttentionByIssueId.has(row.id) ? { blockerAttention: blockerAttentionByIssueId.get(row.id) } : {}),
