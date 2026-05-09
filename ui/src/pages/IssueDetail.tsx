@@ -598,6 +598,14 @@ type IssueDetailChatTabProps = {
   blockedBy: Issue["blockedBy"];
   blockerAttention: Issue["blockerAttention"] | null;
   successfulRunHandoff: Issue["successfulRunHandoff"] | null;
+  recoveryAction: Issue["activeRecoveryAction"];
+  onResolveRecoveryAction?: (outcome: import("../components/IssueRecoveryActionCard").RecoveryResolveOutcome) => void;
+  canCancelRecoveryAction?: boolean;
+  legacyRecoverySourceIssue?: {
+    identifier: string | null;
+    href: string;
+    title?: string | null;
+  } | null;
   comments: IssueDetailComment[];
   locallyQueuedCommentRunIds: ReadonlyMap<string, string>;
   interactions: IssueThreadInteraction[];
@@ -661,6 +669,10 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
   blockedBy,
   blockerAttention,
   successfulRunHandoff,
+  recoveryAction,
+  onResolveRecoveryAction,
+  canCancelRecoveryAction,
+  legacyRecoverySourceIssue,
   comments,
   locallyQueuedCommentRunIds,
   interactions,
@@ -867,6 +879,10 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
         blockedBy={blockedBy ?? []}
         blockerAttention={blockerAttention}
         successfulRunHandoff={successfulRunHandoff}
+        recoveryAction={recoveryAction ?? null}
+        onResolveRecoveryAction={onResolveRecoveryAction}
+        canCancelRecoveryAction={canCancelRecoveryAction}
+        legacyRecoverySourceIssue={legacyRecoverySourceIssue ?? null}
         companyId={companyId}
         projectId={projectId}
         issueStatus={issueStatus}
@@ -2909,6 +2925,28 @@ export function IssueDetail() {
   const handleResumeFromBacklog = useCallback(async () => {
     await updateIssue.mutateAsync({ status: "todo" });
   }, [updateIssue.mutateAsync]);
+  const handleResolveRecoveryAction = useCallback(
+    (outcome: import("../components/IssueRecoveryActionCard").RecoveryResolveOutcome) => {
+      switch (outcome) {
+        case "done":
+          void updateIssue.mutateAsync({ status: "done" });
+          return;
+        case "in_review":
+          void updateIssue.mutateAsync({ status: "in_review" });
+          return;
+        case "blocked":
+          void updateIssue.mutateAsync({ status: "blocked" });
+          return;
+        case "delegated":
+          if (issue) openNewIssue(buildSubIssueDefaultsForViewer(issue, currentUserId));
+          return;
+        case "false_positive":
+          void updateIssue.mutateAsync({ status: "cancelled" });
+          return;
+      }
+    },
+    [currentUserId, issue, openNewIssue, updateIssue.mutateAsync],
+  );
 
   const treePreviewAffectedIssues = useMemo(
     () => (treeControlPreview?.issues ?? []).filter((candidate) => !candidate.skipped),
@@ -2970,6 +3008,22 @@ export function IssueDetail() {
 
   // Ancestors are returned oldest-first from the server (root at end, immediate parent at start)
   const ancestors = issue.ancestors ?? [];
+  const legacyRecoverySourceIssue = (() => {
+    if (
+      issue.originKind !== "stranded_issue_recovery" &&
+      issue.originKind !== "stale_active_run_evaluation"
+    ) {
+      return null;
+    }
+    const parent = ancestors.length > 0 ? ancestors[0] : null;
+    if (!parent) return null;
+    const ref = parent.identifier ?? parent.id;
+    return {
+      identifier: parent.identifier ?? null,
+      title: parent.title ?? null,
+      href: createIssueDetailPath(ref),
+    };
+  })();
   const handleFilePicked = async (evt: ChangeEvent<HTMLInputElement>) => {
     const files = evt.target.files;
     if (!files || files.length === 0) return;
@@ -3787,6 +3841,10 @@ export function IssueDetail() {
               blockedBy={issue.blockedBy ?? []}
               blockerAttention={issue.blockerAttention ?? null}
               successfulRunHandoff={issue.successfulRunHandoff ?? null}
+              recoveryAction={issue.activeRecoveryAction ?? null}
+              onResolveRecoveryAction={handleResolveRecoveryAction}
+              canCancelRecoveryAction={canManageTreeControl}
+              legacyRecoverySourceIssue={legacyRecoverySourceIssue}
               comments={threadComments}
               locallyQueuedCommentRunIds={locallyQueuedCommentRunIds}
               interactions={interactions}

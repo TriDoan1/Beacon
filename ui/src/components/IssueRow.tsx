@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import type { Issue } from "@paperclipai/shared";
+import type { Issue, IssueRecoveryAction } from "@paperclipai/shared";
 import { Link } from "@/lib/router";
-import { Eye, Flag, X } from "lucide-react";
+import { Eye, Flag, OctagonAlert, RefreshCw, TriangleAlert, X } from "lucide-react";
 import {
   createIssueDetailPath,
   rememberIssueDetailLocationState,
@@ -92,6 +92,8 @@ export function IssueRow({
       Planning
     </span>
   ) : null;
+  const recoveryAction = issue.activeRecoveryAction ?? null;
+  const recoveryIndicator = recoveryAction ? renderRecoveryChip(recoveryAction, selected) : null;
   const parkedBlockerIndicator = hasAssignedBacklogBlocker(issue.blockedBy) ? (
     <span
       data-testid="issue-row-parked-blocker"
@@ -125,6 +127,7 @@ export function IssueRow({
         {productivityReviewIndicator}
         {planningModeIndicator}
         {parkedBlockerIndicator}
+        {recoveryIndicator}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1 sm:contents">
         <span className={cn("line-clamp-2 text-sm sm:order-2 sm:min-w-0 sm:flex-1 sm:truncate sm:line-clamp-none", titleClassName)}>
@@ -151,6 +154,7 @@ export function IssueRow({
               </span>
               {planningModeIndicator}
               {parkedBlockerIndicator}
+              {recoveryIndicator}
             </>
           )}
           {mobileMeta ? (
@@ -228,5 +232,65 @@ export function IssueRow({
         </span>
       ) : null}
     </Link>
+  );
+}
+
+const RECOVERY_CHIP_TONE: Record<
+  "needed" | "in_progress" | "observe_only" | "escalated",
+  { className: string; icon: typeof TriangleAlert; label: string }
+> = {
+  needed: {
+    className:
+      "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+    icon: TriangleAlert,
+    label: "Recovery needed",
+  },
+  in_progress: {
+    className:
+      "border-sky-500/60 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    icon: RefreshCw,
+    label: "Recovery in progress",
+  },
+  observe_only: {
+    className: "border-border bg-muted text-muted-foreground",
+    icon: Eye,
+    label: "Observing active run",
+  },
+  escalated: {
+    className: "border-red-500/60 bg-red-500/15 text-red-700 dark:text-red-300",
+    icon: OctagonAlert,
+    label: "Recovery escalated",
+  },
+};
+
+function rowRecoveryStateFor(action: IssueRecoveryAction): keyof typeof RECOVERY_CHIP_TONE | null {
+  if (action.status === "resolved" || action.status === "cancelled") return null;
+  if (action.status === "escalated") return "escalated";
+  if (action.kind === "active_run_watchdog") return "observe_only";
+  if (action.outcome === "delegated") return "in_progress";
+  return "needed";
+}
+
+function renderRecoveryChip(action: IssueRecoveryAction, selected: boolean): ReactNode {
+  const state = rowRecoveryStateFor(action);
+  if (!state) return null;
+  const tone = RECOVERY_CHIP_TONE[state];
+  const Icon = tone.icon;
+  return (
+    <span
+      data-testid="issue-row-recovery-indicator"
+      data-recovery-state={state}
+      role="status"
+      aria-label={tone.label}
+      className={cn(
+        "ml-1.5 inline-flex shrink-0 items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px] font-medium",
+        tone.className,
+        selected ? "!border-muted-foreground !text-muted-foreground" : null,
+      )}
+      title={`${tone.label} — open the source issue to act.`}
+    >
+      <Icon className="h-2.5 w-2.5" aria-hidden />
+      {tone.label}
+    </span>
   );
 }
