@@ -206,6 +206,8 @@ async function loadAwsCredentials(region: string): Promise<AwsCredentialIdentity
   const now = Date.now();
   let cached = awsCredentialProviders.get(region);
   if (!cached) {
+    // S3Client is only used as a carrier for the AWS SDK default credential provider chain.
+    // No S3 API calls are made here; switch to defaultProvider({ region }) if we add that dependency.
     cached = {
       client: new S3Client({ region }),
       credentials: null,
