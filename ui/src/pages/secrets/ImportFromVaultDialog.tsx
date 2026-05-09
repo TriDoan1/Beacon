@@ -71,7 +71,7 @@ interface DraftSelection {
   description: string;
 }
 
-const KEY_PATTERN = /^[a-zA-Z0-9_.-]+$/;
+const KEY_PATTERN = /^[a-z0-9_.-]+$/;
 const PAGE_SIZE = 50;
 
 function isAwsSelectable(config: CompanySecretProviderConfig) {
@@ -267,7 +267,7 @@ function validateDraftRow(
   if (draft.name.length > 160) return "Name must be 160 characters or fewer.";
   if (!draft.key.trim()) return "Key is required.";
   if (!KEY_PATTERN.test(draft.key)) {
-    return "Key may only contain letters, numbers, dot, underscore, or hyphen.";
+    return "Key may only contain lowercase letters, numbers, dot, underscore, or hyphen.";
   }
   if (draft.key.length > 120) return "Key must be 120 characters or fewer.";
   if (draft.description.length > 500) return "Description must be 500 characters or fewer.";

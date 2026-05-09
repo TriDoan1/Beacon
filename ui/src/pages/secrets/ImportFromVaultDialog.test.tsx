@@ -357,6 +357,77 @@ describe("ImportFromVaultDialog", () => {
     });
   });
 
+  it("requires lowercase operator-entered keys during review", async () => {
+    const externalRef = "arn:aws:secretsmanager:us-east-1:1:secret:prod/openai-XYZ";
+    mockSecretsApi.remoteImportPreview.mockResolvedValueOnce(
+      makePreview([
+        makeCandidate({
+          externalRef,
+          remoteName: "prod/openai",
+          name: "OpenAI API key",
+          key: "openai-api-key",
+        }),
+      ]),
+    );
+
+    const { queryClient } = makeWrapper();
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <ImportFromVaultDialog
+            open
+            onOpenChange={vi.fn()}
+            companyId="company-1"
+            providerConfigs={[awsVault]}
+            existingSecrets={[]}
+          />
+        </QueryClientProvider>,
+      );
+    });
+    await flush();
+    await flush();
+
+    const row = document.querySelector(
+      `[data-testid="vault-row-${externalRef}"]`,
+    ) as HTMLElement | null;
+    await act(async () => {
+      row?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+
+    const continueBtn = Array.from(document.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.includes("Continue"),
+    );
+    await act(async () => {
+      continueBtn!.click();
+    });
+    await flush();
+
+    const keyInput = document.querySelector(
+      `[data-testid="review-key-${externalRef}"]`,
+    ) as HTMLInputElement | null;
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    await act(async () => {
+      valueSetter?.call(keyInput, "MY_KEY");
+      keyInput!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain("lowercase letters");
+    const importBtn = Array.from(document.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.startsWith("Import "),
+    ) as HTMLButtonElement | undefined;
+    expect(importBtn?.disabled).toBe(true);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("submits the operator-entered review description", async () => {
     const externalRef = "arn:aws:secretsmanager:us-east-1:1:secret:prod/openai-XYZ";
     mockSecretsApi.remoteImportPreview.mockResolvedValueOnce(
