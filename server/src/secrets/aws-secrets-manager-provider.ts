@@ -19,6 +19,7 @@ const AWS_SECRETS_MANAGER_SCHEME = "aws_secrets_manager_v1";
 const DEFAULT_PREFIX = "paperclip";
 const DEFAULT_OWNER_TAG = "paperclip";
 const DEFAULT_VERSION_STAGE = "AWSCURRENT";
+const PAPERCLIP_PENDING_VERSION_STAGE = "PAPERCLIP_PENDING";
 const DEFAULT_DELETE_RECOVERY_WINDOW_DAYS = 30;
 const AWS_SECRETS_MANAGER_REQUEST_TIMEOUT_MS = 30_000;
 const AWS_CREDENTIAL_CACHE_TTL_MS = 5 * 60_000;
@@ -95,6 +96,7 @@ interface AwsSecretsManagerGateway {
   putSecretValue(input: {
     SecretId: string;
     SecretString: string;
+    VersionStages?: string[];
   }): Promise<{
     ARN?: string;
     Name?: string;
@@ -113,6 +115,12 @@ interface AwsSecretsManagerGateway {
   deleteSecret(input: {
     SecretId: string;
     RecoveryWindowInDays: number;
+  }): Promise<unknown>;
+  updateSecretVersionStage?(input: {
+    SecretId: string;
+    VersionStage: string;
+    RemoveFromVersionId?: string;
+    MoveToVersionId?: string;
   }): Promise<unknown>;
   listSecrets?(input: {
     MaxResults?: number;
@@ -665,6 +673,7 @@ class AwsSecretsManagerJsonGateway implements AwsSecretsManagerGateway {
   putSecretValue(input: {
     SecretId: string;
     SecretString: string;
+    VersionStages?: string[];
   }) {
     return this.call<{
       ARN?: string;
@@ -691,6 +700,15 @@ class AwsSecretsManagerJsonGateway implements AwsSecretsManagerGateway {
     RecoveryWindowInDays: number;
   }) {
     return this.call("DeleteSecret", input);
+  }
+
+  updateSecretVersionStage(input: {
+    SecretId: string;
+    VersionStage: string;
+    RemoveFromVersionId?: string;
+    MoveToVersionId?: string;
+  }) {
+    return this.call("UpdateSecretVersionStage", input);
   }
 
   listSecrets(input: {
@@ -904,6 +922,7 @@ export function createAwsSecretsManagerProvider(
         const created = await gateway.putSecretValue({
           SecretId: secretId,
           SecretString: input.value,
+          VersionStages: [PAPERCLIP_PENDING_VERSION_STAGE],
         });
         const normalizedSecretId = created.ARN ?? created.Name ?? secretId;
         return {
@@ -990,7 +1009,7 @@ export function createAwsSecretsManagerProvider(
           ? asAwsSecretsManagerMaterial(input.material)
           : null;
 
-      if (input.mode !== "delete" || material?.source !== "managed") return;
+      if (material?.source !== "managed") return;
 
       const config = resolveConfig(input.providerConfig);
       const gateway = resolveGateway(config);
@@ -1001,12 +1020,22 @@ export function createAwsSecretsManagerProvider(
       });
 
       try {
+        if (input.mode === "archive") {
+          if (material.versionId && gateway.updateSecretVersionStage) {
+            await gateway.updateSecretVersionStage({
+              SecretId: secretId,
+              VersionStage: PAPERCLIP_PENDING_VERSION_STAGE,
+              RemoveFromVersionId: material.versionId,
+            });
+          }
+          return;
+        }
         await gateway.deleteSecret({
           SecretId: secretId,
           RecoveryWindowInDays: config.deleteRecoveryWindowDays,
         });
       } catch (error) {
-        normalizeAwsError("deleteSecret", error);
+        normalizeAwsError(input.mode === "archive" ? "updateSecretVersionStage" : "deleteSecret", error);
       }
     },
     healthCheck,

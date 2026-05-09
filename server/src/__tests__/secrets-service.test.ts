@@ -545,6 +545,121 @@ describeEmbeddedPostgres("secretService", () => {
     expect(JSON.stringify(resolveSpy.mock.calls[0]?.[0])).not.toContain("resolved-secret");
   });
 
+  it("cleans up managed provider secrets when create persistence fails", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const awsVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS production",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    const prepared = {
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/create-rollback",
+        versionId: "aws-version-1",
+        source: "managed",
+      },
+      valueSha256: "value-sha-1",
+      fingerprintSha256: "fingerprint-sha-1",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/create-rollback",
+      providerVersionRef: "aws-version-1",
+    };
+    vi.spyOn(awsSecretsManagerProvider, "createSecret").mockResolvedValue(prepared);
+    const deleteSpy = vi.spyOn(awsSecretsManagerProvider, "deleteOrArchive").mockResolvedValue();
+    vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("db insert failed"));
+
+    await expect(
+      svc.create(companyId, {
+        name: "Create Rollback",
+        key: "create-rollback",
+        provider: "aws_secrets_manager",
+        providerConfigId: awsVault.id,
+        value: "runtime-secret",
+      }),
+    ).rejects.toThrow("db insert failed");
+
+    expect(deleteSpy).toHaveBeenCalledWith(expect.objectContaining({
+      material: prepared.material,
+      externalRef: prepared.externalRef,
+      mode: "delete",
+      providerConfig: expect.objectContaining({ id: awsVault.id }),
+      context: {
+        companyId,
+        secretKey: "create-rollback",
+        secretName: "Create Rollback",
+        version: 1,
+      },
+    }));
+  });
+
+  it("archives managed provider versions when rotate persistence fails", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const awsVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS production",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    vi.spyOn(awsSecretsManagerProvider, "createSecret").mockResolvedValue({
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-rollback",
+        versionId: "aws-version-1",
+        source: "managed",
+      },
+      valueSha256: "value-sha-1",
+      fingerprintSha256: "fingerprint-sha-1",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-rollback",
+      providerVersionRef: "aws-version-1",
+    });
+    const secret = await svc.create(companyId, {
+      name: "Rotate Rollback",
+      key: "rotate-rollback",
+      provider: "aws_secrets_manager",
+      providerConfigId: awsVault.id,
+      value: "runtime-secret",
+    });
+    const prepared = {
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-rollback",
+        versionId: "aws-version-2",
+        source: "managed",
+      },
+      valueSha256: "value-sha-2",
+      fingerprintSha256: "fingerprint-sha-2",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-rollback",
+      providerVersionRef: "aws-version-2",
+    };
+    vi.spyOn(awsSecretsManagerProvider, "createVersion").mockResolvedValue(prepared);
+    const deleteSpy = vi.spyOn(awsSecretsManagerProvider, "deleteOrArchive").mockResolvedValue();
+    vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("db rotate failed"));
+
+    await expect(svc.rotate(secret.id, { value: "rotated-runtime-secret" })).rejects.toThrow(
+      "db rotate failed",
+    );
+
+    expect(deleteSpy).toHaveBeenCalledWith(expect.objectContaining({
+      material: prepared.material,
+      externalRef: prepared.externalRef,
+      mode: "archive",
+      providerConfig: expect.objectContaining({ id: awsVault.id }),
+      context: {
+        companyId,
+        secretKey: "rotate-rollback",
+        secretName: "Rotate Rollback",
+        version: 2,
+      },
+    }));
+  });
+
   it("rejects rotation for non-active secrets", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);

@@ -47,7 +47,9 @@ import type {
   PreparedSecretVersion,
   RemoteSecretListResult,
   SecretProviderHealthCheck,
+  SecretProviderModule,
   SecretProviderVaultRuntimeConfig,
+  SecretProviderWriteContext,
 } from "../secrets/types.js";
 import { isSecretProviderClientError } from "../secrets/types.js";
 
@@ -128,6 +130,36 @@ function remoteImportRowFailureReason(error: unknown, fallback: string, context:
     "remote secret import row failed",
   );
   return fallback;
+}
+
+async function cleanupPreparedProviderWrite(input: {
+  provider: SecretProviderModule;
+  prepared: PreparedSecretVersion;
+  providerConfig: SecretProviderVaultRuntimeConfig | null;
+  context: SecretProviderWriteContext;
+  mode: "archive" | "delete";
+  operation: string;
+}) {
+  try {
+    await input.provider.deleteOrArchive({
+      material: input.prepared.material,
+      externalRef: input.prepared.externalRef,
+      providerConfig: input.providerConfig,
+      context: input.context,
+      mode: input.mode,
+    });
+  } catch (cleanupError) {
+    logger.warn(
+      {
+        err: cleanupError,
+        companyId: input.context.companyId,
+        provider: input.provider.id,
+        providerConfigId: input.providerConfig?.id ?? null,
+        operation: input.operation,
+      },
+      "remote secret provider cleanup failed after db write failure",
+    );
+  }
 }
 
 type CanonicalEnvBinding =
@@ -1462,67 +1494,77 @@ export function secretService(db: Db) {
       if (managedMode === "paperclip_managed" && !input.value?.trim()) {
         throw unprocessable("Managed secrets require value");
       }
+      const providerWriteContext = {
+        companyId,
+        secretKey: key,
+        secretName: input.name,
+        version: 1,
+      };
       const prepared =
         managedMode === "external_reference"
           ? await provider.linkExternalSecret({
               externalRef: input.externalRef ?? "",
               providerVersionRef: input.providerVersionRef ?? null,
               providerConfig,
-              context: {
-                companyId,
-                secretKey: key,
-                secretName: input.name,
-                version: 1,
-              },
+              context: providerWriteContext,
             })
           : await provider.createSecret({
               value: input.value ?? "",
               externalRef: null,
               providerConfig,
-              context: {
-                companyId,
-                secretKey: key,
-                secretName: input.name,
-                version: 1,
-              },
+              context: providerWriteContext,
             });
 
-      return db.transaction(async (tx) => {
-        const secret = await tx
-          .insert(companySecrets)
-          .values({
-            companyId,
-            key,
-            name: input.name,
-            provider: input.provider,
-            providerConfigId: input.providerConfigId ?? null,
-            status: "active",
-            managedMode,
-            externalRef: prepared.externalRef,
-            providerMetadata: input.providerMetadata ?? null,
-            latestVersion: 1,
-            description: input.description ?? null,
-            lastRotatedAt: new Date(),
+      try {
+        return await db.transaction(async (tx) => {
+          const secret = await tx
+            .insert(companySecrets)
+            .values({
+              companyId,
+              key,
+              name: input.name,
+              provider: input.provider,
+              providerConfigId: input.providerConfigId ?? null,
+              status: "active",
+              managedMode,
+              externalRef: prepared.externalRef,
+              providerMetadata: input.providerMetadata ?? null,
+              latestVersion: 1,
+              description: input.description ?? null,
+              lastRotatedAt: new Date(),
+              createdByAgentId: actor?.agentId ?? null,
+              createdByUserId: actor?.userId ?? null,
+            })
+            .returning()
+            .then((rows) => rows[0]);
+
+          await tx.insert(companySecretVersions).values({
+            secretId: secret.id,
+            version: 1,
+            material: prepared.material,
+            valueSha256: prepared.valueSha256,
+            fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
+            providerVersionRef: prepared.providerVersionRef ?? null,
+            status: "current",
             createdByAgentId: actor?.agentId ?? null,
             createdByUserId: actor?.userId ?? null,
-          })
-          .returning()
-          .then((rows) => rows[0]);
+          });
 
-        await tx.insert(companySecretVersions).values({
-          secretId: secret.id,
-          version: 1,
-          material: prepared.material,
-          valueSha256: prepared.valueSha256,
-          fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
-          providerVersionRef: prepared.providerVersionRef ?? null,
-          status: "current",
-          createdByAgentId: actor?.agentId ?? null,
-          createdByUserId: actor?.userId ?? null,
+          return secret;
         });
-
-        return secret;
-      });
+      } catch (error) {
+        if (managedMode === "paperclip_managed") {
+          await cleanupPreparedProviderWrite({
+            provider,
+            prepared,
+            providerConfig,
+            context: providerWriteContext,
+            mode: "delete",
+            operation: "create.rollback",
+          });
+        }
+        throw error;
+      }
     },
 
     rotate: async (
@@ -1557,64 +1599,74 @@ export function secretService(db: Db) {
       if (secret.managedMode !== "external_reference" && !input.value?.trim()) {
         throw unprocessable("Managed secrets require value");
       }
+      const providerWriteContext = {
+        companyId: secret.companyId,
+        secretKey: secret.key,
+        secretName: secret.name,
+        version: nextVersion,
+      };
       const prepared =
         secret.managedMode === "external_reference"
           ? await provider.linkExternalSecret({
               externalRef: input.externalRef ?? secret.externalRef ?? "",
               providerVersionRef: input.providerVersionRef ?? null,
               providerConfig,
-              context: {
-                companyId: secret.companyId,
-                secretKey: secret.key,
-                secretName: secret.name,
-                version: nextVersion,
-              },
+              context: providerWriteContext,
             })
           : await provider.createVersion({
               value: input.value ?? "",
               externalRef: secret.externalRef ?? null,
               providerConfig,
-              context: {
-                companyId: secret.companyId,
-                secretKey: secret.key,
-                secretName: secret.name,
-                version: nextVersion,
-              },
+              context: providerWriteContext,
             });
 
-      return db.transaction(async (tx) => {
-        await tx
-          .update(companySecretVersions)
-          .set({ status: "previous" })
-          .where(eq(companySecretVersions.secretId, secret.id));
-        await tx.insert(companySecretVersions).values({
-          secretId: secret.id,
-          version: nextVersion,
-          material: prepared.material,
-          valueSha256: prepared.valueSha256,
-          fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
-          providerVersionRef: prepared.providerVersionRef ?? null,
-          status: "current",
-          createdByAgentId: actor?.agentId ?? null,
-          createdByUserId: actor?.userId ?? null,
+      try {
+        return await db.transaction(async (tx) => {
+          await tx
+            .update(companySecretVersions)
+            .set({ status: "previous" })
+            .where(eq(companySecretVersions.secretId, secret.id));
+          await tx.insert(companySecretVersions).values({
+            secretId: secret.id,
+            version: nextVersion,
+            material: prepared.material,
+            valueSha256: prepared.valueSha256,
+            fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
+            providerVersionRef: prepared.providerVersionRef ?? null,
+            status: "current",
+            createdByAgentId: actor?.agentId ?? null,
+            createdByUserId: actor?.userId ?? null,
+          });
+
+          const updated = await tx
+            .update(companySecrets)
+            .set({
+              latestVersion: nextVersion,
+              externalRef: prepared.externalRef,
+              providerConfigId,
+              lastRotatedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(companySecrets.id, secret.id))
+            .returning()
+            .then((rows) => rows[0] ?? null);
+
+          if (!updated) throw notFound("Secret not found");
+          return updated;
         });
-
-        const updated = await tx
-          .update(companySecrets)
-          .set({
-            latestVersion: nextVersion,
-            externalRef: prepared.externalRef,
-            providerConfigId,
-            lastRotatedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(companySecrets.id, secret.id))
-          .returning()
-          .then((rows) => rows[0] ?? null);
-
-        if (!updated) throw notFound("Secret not found");
-        return updated;
-      });
+      } catch (error) {
+        if (secret.managedMode !== "external_reference") {
+          await cleanupPreparedProviderWrite({
+            provider,
+            prepared,
+            providerConfig,
+            context: providerWriteContext,
+            mode: "archive",
+            operation: "rotate.rollback",
+          });
+        }
+        throw error;
+      }
     },
 
     update: async (

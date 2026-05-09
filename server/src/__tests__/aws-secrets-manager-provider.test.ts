@@ -270,6 +270,7 @@ describe("awsSecretsManagerProvider", () => {
           SecretId:
             "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company-1/openai-api-key",
           SecretString: "rotated-secret-value",
+          VersionStages: ["PAPERCLIP_PENDING"],
         },
       },
     ]);
@@ -746,6 +747,72 @@ describe("awsSecretsManagerProvider", () => {
           SecretId:
             "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company-1/openai-api-key",
           RecoveryWindowInDays: 30,
+        },
+      },
+    ]);
+  });
+
+  it("archives pending Paperclip-managed AWS versions without deleting the secret", async () => {
+    const calls: Array<{ op: string; input: Record<string, unknown> }> = [];
+    const provider = createAwsSecretsManagerProvider({
+      config: {
+        region: "us-east-1",
+        endpoint: "https://secretsmanager.us-east-1.amazonaws.com",
+        deploymentId: "prod-use1",
+        prefix: "paperclip",
+        kmsKeyId: "arn:aws:kms:us-east-1:123456789012:key/test",
+        environmentTag: "production",
+        providerOwnerTag: "paperclip",
+        deleteRecoveryWindowDays: 30,
+      },
+      gateway: {
+        async createSecret() {
+          throw new Error("not used");
+        },
+        async putSecretValue() {
+          throw new Error("not used");
+        },
+        async getSecretValue() {
+          throw new Error("not used");
+        },
+        async deleteSecret(input) {
+          calls.push({ op: "deleteSecret", input });
+          return {};
+        },
+        async updateSecretVersionStage(input) {
+          calls.push({ op: "updateSecretVersionStage", input });
+          return {};
+        },
+      },
+    });
+
+    await provider.deleteOrArchive({
+      mode: "archive",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company-1/openai-api-key",
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company-1/openai-api-key",
+        versionId: "aws-version-2",
+        source: "managed",
+      },
+      context: {
+        companyId: "company-1",
+        secretKey: "openai-api-key",
+        secretName: "OpenAI API Key",
+        version: 2,
+      },
+    });
+
+    expect(calls).toEqual([
+      {
+        op: "updateSecretVersionStage",
+        input: {
+          SecretId:
+            "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company-1/openai-api-key",
+          VersionStage: "PAPERCLIP_PENDING",
+          RemoveFromVersionId: "aws-version-2",
         },
       },
     ]);
