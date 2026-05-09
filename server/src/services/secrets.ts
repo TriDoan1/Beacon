@@ -1685,6 +1685,7 @@ export function secretService(db: Db) {
     ) => {
       const secret = await getById(secretId);
       if (!secret) throw notFound("Secret not found");
+      if (secret.status === "deleted") throw notFound("Secret not found");
 
       if (patch.name && patch.name !== secret.name) {
         const duplicate = await getByName(secret.companyId, patch.name);

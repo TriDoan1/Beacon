@@ -401,6 +401,29 @@ describeEmbeddedPostgres("secretService", () => {
     ).rejects.toThrow(/not found/i);
   });
 
+  it("rejects updates to already soft-deleted external reference secrets", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const awsVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS production",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    const deleted = await svc.create(companyId, {
+      name: "Deleted patch target",
+      key: "deleted-patch-target",
+      provider: "aws_secrets_manager",
+      providerConfigId: awsVault.id,
+      managedMode: "external_reference",
+      externalRef: "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/deleted-patch-target",
+    });
+    await svc.update(deleted.id, { status: "deleted" });
+
+    await expect(svc.update(deleted.id, { status: "active" })).rejects.toThrow(
+      /not found/i,
+    );
+  });
+
   it("allows re-importing a remote secret after the prior external reference is soft-deleted", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);
