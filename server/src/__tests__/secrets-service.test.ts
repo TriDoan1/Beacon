@@ -367,6 +367,40 @@ describeEmbeddedPostgres("secretService", () => {
     expect(recreated.key).toBe("reusable-key");
   });
 
+  it("rejects bindings and env refs to soft-deleted external reference secrets", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const awsVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS production",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    const deleted = await svc.create(companyId, {
+      name: "Deleted external",
+      key: "deleted-external",
+      provider: "aws_secrets_manager",
+      providerConfigId: awsVault.id,
+      managedMode: "external_reference",
+      externalRef: "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/deleted",
+    });
+    await svc.update(deleted.id, { status: "deleted" });
+
+    await expect(
+      svc.createBinding({
+        companyId,
+        secretId: deleted.id,
+        targetType: "agent",
+        targetId: "agent-1",
+        configPath: "env.API_KEY",
+      }),
+    ).rejects.toThrow(/not found/i);
+    await expect(
+      svc.normalizeEnvBindingsForPersistence(companyId, {
+        API_KEY: { type: "secret_ref", secretId: deleted.id, version: "latest" },
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
+
   it("allows re-importing a remote secret after the prior external reference is soft-deleted", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);
