@@ -528,7 +528,7 @@ export function secretService(db: Db) {
         context,
         outcome: "failure",
         errorCode,
-      });
+      }).catch(() => undefined);
       throw err;
     }
   }
@@ -776,12 +776,12 @@ export function secretService(db: Db) {
       })
       .from(companySecrets)
       .where(eq(companySecrets.companyId, companyId));
+    const activeSecrets = existingSecrets.filter((secret) => secret.status !== "deleted");
     return {
       byProviderConfigExternalRef: new Map(
-        existingSecrets
+        activeSecrets
           .filter((secret) =>
             secret.provider === provider &&
-            secret.status !== "deleted" &&
             typeof secret.externalRef === "string" &&
             secret.externalRef.trim()
           )
@@ -790,8 +790,8 @@ export function secretService(db: Db) {
             secret,
           ]),
       ),
-      byName: new Map(existingSecrets.map((secret) => [secret.name, secret])),
-      byKey: new Map(existingSecrets.map((secret) => [secret.key, secret])),
+      byName: new Map(activeSecrets.map((secret) => [secret.name, secret])),
+      byKey: new Map(activeSecrets.map((secret) => [secret.key, secret])),
     };
   }
 
@@ -1865,6 +1865,8 @@ export function secretService(db: Db) {
       await db
         .update(companySecrets)
         .set({
+          key: `${secret.key}__deleted__${secret.id}`,
+          name: `${secret.name}__deleted__${secret.id}`,
           status: "deleted",
           deletedAt: secret.deletedAt ?? new Date(),
           updatedAt: new Date(),

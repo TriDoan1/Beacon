@@ -16,6 +16,7 @@ import {
 } from "@paperclipai/db";
 import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } from "./helpers/embedded-postgres.js";
 import { awsSecretsManagerProvider } from "../secrets/aws-secrets-manager-provider.js";
+import { localEncryptedProvider } from "../secrets/local-encrypted-provider.js";
 import { SecretProviderClientError } from "../secrets/types.js";
 import { secretService } from "../services/secrets.js";
 
@@ -243,6 +244,35 @@ describeEmbeddedPostgres("secretService", () => {
     ).rejects.toThrow(/not bound/i);
   });
 
+  it("preserves the original resolution error when failure access logging fails", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const secret = await svc.create(companyId, {
+      name: `resolution-failure-${randomUUID()}`,
+      provider: "local_encrypted",
+      value: "runtime-secret",
+    });
+    await svc.createBinding({
+      companyId,
+      secretId: secret.id,
+      targetType: "system",
+      targetId: "system",
+      configPath: "env.API_KEY",
+    });
+    vi.spyOn(localEncryptedProvider, "resolveVersion").mockRejectedValueOnce(
+      new Error("provider resolution failed"),
+    );
+
+    await expect(
+      svc.resolveSecretValue(companyId, secret.id, "latest", {
+        consumerType: "system",
+        consumerId: "system",
+        configPath: "env.API_KEY",
+        heartbeatRunId: randomUUID(),
+      }),
+    ).rejects.toThrow("provider resolution failed");
+  });
+
   it("keeps one default provider vault per company provider", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);
@@ -347,6 +377,56 @@ describeEmbeddedPostgres("secretService", () => {
           externalRef,
           name: "Reimported external",
           key: "reimported-external",
+        },
+      ],
+    });
+
+    expect(preview.candidates[0]).toMatchObject({
+      status: "ready",
+      importable: true,
+      conflicts: [],
+    });
+    expect(result).toMatchObject({ importedCount: 1, skippedCount: 0, errorCount: 0 });
+  });
+
+  it("ignores soft-deleted name and key conflicts during remote import", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const awsVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS production",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    const deleted = await svc.create(companyId, {
+      name: "Deleted external",
+      key: "deleted-external",
+      provider: "aws_secrets_manager",
+      providerConfigId: awsVault.id,
+      managedMode: "external_reference",
+      externalRef: "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/deleted-old",
+    });
+    await svc.update(deleted.id, { status: "deleted" });
+    vi.spyOn(awsSecretsManagerProvider, "listRemoteSecrets").mockResolvedValue({
+      secrets: [
+        {
+          externalRef: "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/deleted-new",
+          name: "Deleted external",
+          providerVersionRef: null,
+          metadata: {},
+        },
+      ],
+    });
+
+    const preview = await svc.previewRemoteImport(companyId, {
+      providerConfigId: awsVault.id,
+    });
+    const result = await svc.importRemoteSecrets(companyId, {
+      providerConfigId: awsVault.id,
+      secrets: [
+        {
+          externalRef: "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/deleted-new",
+          name: "Deleted external",
+          key: "deleted-external",
         },
       ],
     });
@@ -986,6 +1066,65 @@ describeEmbeddedPostgres("secretService", () => {
       providerConfig: null,
     });
     expect(persisted).toBeNull();
+  });
+
+  it("renames name and key during removal before provider deletion", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const externalRef =
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company-1/remove-failure";
+    const secret = await db
+      .insert(companySecrets)
+      .values({
+        companyId,
+        key: "remove-failure",
+        name: "Remove Failure",
+        provider: "aws_secrets_manager",
+        managedMode: "paperclip_managed",
+        externalRef,
+        latestVersion: 1,
+        status: "active",
+      })
+      .returning()
+      .then((rows) => rows[0]);
+
+    await db.insert(companySecretVersions).values({
+      secretId: secret.id,
+      version: 1,
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId: externalRef,
+        versionId: "aws-version-1",
+        source: "managed",
+      },
+      valueSha256: "value-sha-1",
+      fingerprintSha256: "fingerprint-sha-1",
+      providerVersionRef: "aws-version-1",
+      status: "current",
+    });
+    vi.spyOn(awsSecretsManagerProvider, "deleteOrArchive").mockRejectedValueOnce(
+      new Error("provider delete failed"),
+    );
+
+    await expect(svc.remove(secret.id)).rejects.toThrow("provider delete failed");
+    const persisted = await db
+      .select()
+      .from(companySecrets)
+      .where(eq(companySecrets.id, secret.id))
+      .then((rows) => rows[0] ?? null);
+    const recreated = await svc.create(companyId, {
+      name: "Remove Failure",
+      key: "remove-failure",
+      provider: "local_encrypted",
+      value: "replacement",
+    });
+
+    expect(persisted).toMatchObject({
+      status: "deleted",
+      key: `remove-failure__deleted__${secret.id}`,
+      name: `Remove Failure__deleted__${secret.id}`,
+    });
+    expect(recreated.id).not.toBe(secret.id);
   });
 
   it("removes DB rows even when the attached provider vault is disabled", async () => {
