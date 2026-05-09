@@ -297,10 +297,14 @@ export function SidebarProjects() {
     <SidebarSection
       label="Projects"
       collapsible={{ open, onOpenChange: setOpen }}
+      headerAction={{
+        ariaLabel: "New project",
+        icon: Plus,
+        onClick: openNewProject,
+      }}
       menu={{
         ariaLabel: "Projects section actions",
         actions: [
-          { type: "item", label: "New project", icon: Plus, onSelect: openNewProject },
           { type: "item", label: "Browse projects", icon: FolderOpen, href: "/projects" },
           { type: "separator" },
         ],

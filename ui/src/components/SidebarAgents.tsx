@@ -351,10 +351,14 @@ export function SidebarAgents() {
     <SidebarSection
       label="Agents"
       collapsible={{ open, onOpenChange: setOpen }}
+      headerAction={{
+        ariaLabel: "New agent",
+        icon: Plus,
+        onClick: openNewAgent,
+      }}
       menu={{
         ariaLabel: "Agents section actions",
         actions: [
-          { type: "item", label: "New agent", icon: Plus, onSelect: openNewAgent },
           { type: "item", label: "Browse agents", icon: Users, href: "/agents/all" },
           { type: "separator" },
         ],

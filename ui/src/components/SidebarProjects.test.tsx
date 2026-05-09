@@ -256,23 +256,28 @@ describe("SidebarProjects", () => {
     expect(container.querySelector('[data-testid="project-slot-project-b"]')).toBeTruthy();
   });
 
-  it("moves project creation into the section menu and links browse projects", async () => {
+  it("uses the heading for section menu and the plus button for project creation", async () => {
     await renderSidebarProjects();
 
-    expect(container.querySelector('button[aria-label="New project"]')).toBeNull();
+    const sectionMenuTrigger = container.querySelector('button[aria-label="Projects section actions"]');
+    expect(sectionMenuTrigger?.textContent).toContain("Projects");
+    expect(sectionMenuTrigger?.querySelector("svg")).toBeNull();
+
+    const newProjectButton = container.querySelector('button[aria-label="New project"]');
+    expect(newProjectButton).toBeTruthy();
+    await act(async () => {
+      newProjectButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(mockOpenNewProject).toHaveBeenCalledTimes(1);
+
     await openProjectsMenu(container);
 
     const newProjectItem = Array.from(document.body.querySelectorAll('[data-slot="dropdown-menu-item"]'))
       .find((element) => element.textContent?.includes("New project"));
-    expect(newProjectItem).toBeTruthy();
+    expect(newProjectItem).toBeFalsy();
     const browseLink = Array.from(document.body.querySelectorAll("a"))
       .find((element) => element.textContent?.includes("Browse projects"));
     expect(browseLink?.getAttribute("href")).toBe("/projects");
-
-    await act(async () => {
-      newProjectItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(mockOpenNewProject).toHaveBeenCalledTimes(1);
   });
 
   it("sorts alphabetically and persists the selected mode per company and user", async () => {

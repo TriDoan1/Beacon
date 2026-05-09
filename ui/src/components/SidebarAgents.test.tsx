@@ -237,23 +237,28 @@ describe("SidebarAgents", () => {
     expect(agentLinkLabels(container)).toEqual(["Bravo", "Alpha", "Charlie"]);
   });
 
-  it("moves agent creation into the section menu and links browse agents", async () => {
+  it("uses the heading for section menu and the plus button for agent creation", async () => {
     await renderSidebarAgents();
 
-    expect(container.querySelector('button[aria-label="New agent"]')).toBeNull();
+    const sectionMenuTrigger = container.querySelector('button[aria-label="Agents section actions"]');
+    expect(sectionMenuTrigger?.textContent).toContain("Agents");
+    expect(sectionMenuTrigger?.querySelector("svg")).toBeNull();
+
+    const newAgentButton = container.querySelector('button[aria-label="New agent"]');
+    expect(newAgentButton).toBeTruthy();
+    await act(async () => {
+      newAgentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(mockOpenNewAgent).toHaveBeenCalledTimes(1);
+
     await openAgentsSectionMenu();
 
     const newAgentItem = Array.from(document.body.querySelectorAll('[data-slot="dropdown-menu-item"]'))
       .find((element) => element.textContent?.includes("New agent"));
-    expect(newAgentItem).toBeTruthy();
+    expect(newAgentItem).toBeFalsy();
     const browseLink = Array.from(document.body.querySelectorAll("a"))
       .find((element) => element.textContent?.includes("Browse agents"));
     expect(browseLink?.getAttribute("href")).toBe("/agents/all");
-
-    await act(async () => {
-      newAgentItem?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(mockOpenNewAgent).toHaveBeenCalledTimes(1);
   });
 
   it("sorts alphabetically and persists the selected mode per company and user", async () => {

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarSection } from "./SidebarSection";
+import { Plus } from "lucide-react";
 
 const sidebarState = vi.hoisted(() => ({
   isMobile: false,
@@ -92,9 +93,44 @@ describe("SidebarSection", () => {
     const projectsLabel = Array.from(container.querySelectorAll("span"))
       .find((element) => element.textContent === "Projects");
 
-    expect(workLabel?.previousElementSibling?.className).toContain("w-3");
-    expect(projectsLabel?.previousElementSibling?.tagName.toLowerCase()).toBe("svg");
-    expect(projectsLabel?.previousElementSibling?.getAttribute("class")).toContain("w-3");
+    expect(workLabel?.parentElement?.textContent).toBe("Work");
+    expect(projectsLabel?.parentElement?.textContent).toBe("Projects");
+    expect(projectsLabel?.parentElement?.querySelector("svg")).toBeNull();
+    expect(container.querySelector('button[aria-label="Collapse Projects"] svg')).toBeTruthy();
+  });
+
+  it("keeps collapse on the caret and opens the menu from the heading", async () => {
+    const onOpenChange = vi.fn();
+    const currentRoot = createRoot(container);
+    root = currentRoot;
+
+    await act(async () => {
+      currentRoot.render(
+        <SidebarSection
+          label="Projects"
+          collapsible={{ open: true, onOpenChange }}
+          menu={{
+            ariaLabel: "Projects section actions",
+            actions: [{ type: "item", label: "Browse projects", href: "/projects" }],
+          }}
+        >
+          <a href="/projects">Projects</a>
+        </SidebarSection>,
+      );
+    });
+    await flushReact();
+
+    await openSectionMenu(container);
+
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Browse projects");
+
+    const caret = container.querySelector('button[aria-label="Collapse Projects"]');
+    await act(async () => {
+      caret?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("renders configured menu actions and radio choices", async () => {
@@ -170,6 +206,11 @@ describe("SidebarSection", () => {
             ariaLabel: "Projects section actions",
             actions: [{ type: "item", label: "New project" }],
           }}
+          headerAction={{
+            ariaLabel: "New project",
+            icon: Plus,
+            onClick: vi.fn(),
+          }}
         >
           <a href="/projects">Projects</a>
         </SidebarSection>,
@@ -179,12 +220,13 @@ describe("SidebarSection", () => {
 
     const projectsLabel = Array.from(container.querySelectorAll("span"))
       .find((element) => element.textContent === "Projects");
-    const caret = projectsLabel?.previousElementSibling;
-    const trigger = container.querySelector('button[aria-label="Projects section actions"]');
+    const caret = container.querySelector('button[aria-label="Expand Projects"] svg');
+    const action = container.querySelector('button[aria-label="New project"]');
 
     expect(caret?.getAttribute("class")).toContain("opacity-100");
     expect(caret?.getAttribute("class")).not.toContain("opacity-0");
-    expect(trigger?.getAttribute("class")).toContain("opacity-100");
-    expect(trigger?.getAttribute("class")).not.toContain("opacity-0");
+    expect(projectsLabel?.parentElement?.textContent).toBe("Projects");
+    expect(action?.getAttribute("class")).toContain("opacity-100");
+    expect(action?.getAttribute("class")).not.toContain("opacity-0");
   });
 });
