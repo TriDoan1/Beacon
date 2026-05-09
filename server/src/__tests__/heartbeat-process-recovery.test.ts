@@ -748,16 +748,18 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       ));
     expect(recoveryIssues).toHaveLength(0);
 
-    const wakeups = await db
-      .select()
-      .from(agentWakeupRequests)
-      .where(eq(agentWakeupRequests.agentId, input.agentId));
-    const recoveryWakeup = wakeups.find((wakeup) => {
-      const payload = wakeup.payload as Record<string, unknown> | null;
-      return payload?.issueId === input.issueId &&
-        payload?.sourceIssueId === input.issueId &&
-        payload?.recoveryActionId === action.id &&
-        payload?.strandedRunId === input.runId;
+    const recoveryWakeup = await waitForValue(async () => {
+      const wakeups = await db
+        .select()
+        .from(agentWakeupRequests)
+        .where(eq(agentWakeupRequests.agentId, input.agentId));
+      return wakeups.find((wakeup) => {
+        const payload = wakeup.payload as Record<string, unknown> | null;
+        return payload?.issueId === input.issueId &&
+          payload?.sourceIssueId === input.issueId &&
+          payload?.recoveryActionId === action.id &&
+          payload?.strandedRunId === input.runId;
+      }) ?? null;
     });
     expect(recoveryWakeup).toMatchObject({
       companyId: input.companyId,
