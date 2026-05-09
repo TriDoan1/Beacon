@@ -1733,6 +1733,15 @@ export function secretService(db: Db) {
           "External reference secrets cannot change provider vault through generic update",
         );
       }
+      if (
+        secret.managedMode === "paperclip_managed" &&
+        patch.providerConfigId !== undefined &&
+        patch.providerConfigId !== secret.providerConfigId
+      ) {
+        throw unprocessable(
+          "Managed secrets cannot change provider vault through PATCH; use rotate() to migrate to a new vault",
+        );
+      }
       if (patch.providerConfigId !== undefined) {
         await assertProviderConfigForSecret(
           secret.companyId,

@@ -725,6 +725,48 @@ describeEmbeddedPostgres("secretService", () => {
     }));
   });
 
+  it("rejects generic provider vault reassignment for managed secrets", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const firstVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS primary",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    const secondVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS secondary",
+      config: { region: "us-west-2", namespace: "prod-usw2" },
+    });
+    vi.spyOn(awsSecretsManagerProvider, "createSecret").mockResolvedValue({
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/vault-reassign",
+        versionId: "aws-version-1",
+        source: "managed",
+      },
+      valueSha256: "value-sha-1",
+      fingerprintSha256: "fingerprint-sha-1",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/vault-reassign",
+      providerVersionRef: "aws-version-1",
+    });
+    const secret = await svc.create(companyId, {
+      name: "Vault Reassign",
+      key: "vault-reassign",
+      provider: "aws_secrets_manager",
+      providerConfigId: firstVault.id,
+      value: "runtime-secret",
+    });
+
+    await expect(svc.update(secret.id, { providerConfigId: secondVault.id })).rejects.toThrow(
+      /managed secrets cannot change provider vault/i,
+    );
+    const persisted = await svc.getById(secret.id);
+    expect(persisted?.providerConfigId).toBe(firstVault.id);
+  });
+
   it("rejects rotation for non-active secrets", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);
