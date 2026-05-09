@@ -53,6 +53,7 @@ import {
   goalService,
   heartbeatService,
   issueApprovalService,
+  issueRecoveryActionService,
   issueThreadInteractionService,
   ISSUE_LIST_DEFAULT_LIMIT,
   ISSUE_LIST_MAX_LIMIT,
@@ -787,6 +788,7 @@ export function issueRoutes(
   const projectsSvc = projectService(db);
   const goalsSvc = goalService(db);
   const issueApprovalsSvc = issueApprovalService(db);
+  const recoveryActionsSvc = issueRecoveryActionService(db);
   const executionWorkspacesSvc = executionWorkspaceServiceDirect(db);
   const workProductsSvc = workProductService(db);
   const documentsSvc = documentService(db);
@@ -1541,6 +1543,7 @@ export function issueRoutes(
       attachments,
       continuationSummary,
       currentExecutionWorkspace,
+      activeRecoveryAction,
     ] =
       await Promise.all([
         resolveIssueProjectAndGoal(issue),
@@ -1554,6 +1557,7 @@ export function issueRoutes(
         svc.listAttachments(issue.id),
         documentsSvc.getIssueDocumentByKey(issue.id, ISSUE_CONTINUATION_SUMMARY_DOCUMENT_KEY),
         currentExecutionWorkspacePromise,
+        recoveryActionsSvc.getActiveForIssue(issue.companyId, issue.id),
       ]);
 
     res.json({
@@ -1567,6 +1571,7 @@ export function issueRoutes(
         ...(blockerAttention ? { blockerAttention } : {}),
         productivityReview,
         scheduledRetry,
+        activeRecoveryAction,
         priority: issue.priority,
         projectId: issue.projectId,
         goalId: goal?.id ?? issue.goalId,
@@ -1649,6 +1654,7 @@ export function issueRoutes(
       referenceSummary,
       successfulRunHandoffStates,
       scheduledRetry,
+      activeRecoveryAction,
     ] = await Promise.all([
       resolveIssueProjectAndGoal(issue),
       svc.getAncestors(issue.id),
@@ -1660,6 +1666,7 @@ export function issueRoutes(
       issueReferencesSvc.listIssueReferenceSummary(issue.id),
       listSuccessfulRunHandoffStates(db, issue.companyId, [issue.id]),
       svc.getCurrentScheduledRetry(issue.id),
+      recoveryActionsSvc.getActiveForIssue(issue.companyId, issue.id),
     ]);
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
@@ -1676,6 +1683,7 @@ export function issueRoutes(
       productivityReview,
       successfulRunHandoff: successfulRunHandoffStates.get(issue.id) ?? null,
       scheduledRetry,
+      activeRecoveryAction,
       blockedBy: relations.blockedBy,
       blocks: relations.blocks,
       relatedWork: referenceSummary,
@@ -1686,6 +1694,21 @@ export function issueRoutes(
       mentionedProjects,
       currentExecutionWorkspace,
       workProducts,
+    });
+  });
+
+  router.get("/issues/:id/recovery-actions", async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+    const active = await recoveryActionsSvc.getActiveForIssue(issue.companyId, issue.id);
+    res.json({
+      active,
+      actions: active ? [active] : [],
     });
   });
 

@@ -14,6 +14,10 @@ import {
   ISSUE_COMMENT_PRESENTATION_TONES,
   ISSUE_MONITOR_SCHEDULED_BY,
   ISSUE_PRIORITIES,
+  ISSUE_RECOVERY_ACTION_KINDS,
+  ISSUE_RECOVERY_ACTION_OUTCOMES,
+  ISSUE_RECOVERY_ACTION_OWNER_TYPES,
+  ISSUE_RECOVERY_ACTION_STATUSES,
   ISSUE_WORK_MODES,
   clampIssueRequestDepth,
   ISSUE_STATUSES,
@@ -166,6 +170,37 @@ export const issueExecutionStateSchema = z.object({
   lastDecisionOutcome: z.enum(ISSUE_EXECUTION_DECISION_OUTCOMES).nullable(),
   monitor: issueExecutionMonitorStateSchema.optional().nullable(),
 });
+
+export const issueRecoveryActionReadModelSchema = z.object({
+  id: z.string().uuid(),
+  companyId: z.string().uuid(),
+  sourceIssueId: z.string().uuid(),
+  recoveryIssueId: z.string().uuid().nullable(),
+  kind: z.enum(ISSUE_RECOVERY_ACTION_KINDS),
+  status: z.enum(ISSUE_RECOVERY_ACTION_STATUSES),
+  ownerType: z.enum(ISSUE_RECOVERY_ACTION_OWNER_TYPES),
+  ownerAgentId: z.string().uuid().nullable(),
+  ownerUserId: z.string().nullable(),
+  previousOwnerAgentId: z.string().uuid().nullable(),
+  returnOwnerAgentId: z.string().uuid().nullable(),
+  cause: z.string().min(1),
+  fingerprint: z.string().min(1),
+  evidence: z.record(z.unknown()),
+  nextAction: z.string().min(1),
+  wakePolicy: z.record(z.unknown()).nullable(),
+  monitorPolicy: z.record(z.unknown()).nullable(),
+  attemptCount: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().positive().nullable(),
+  timeoutAt: z.union([z.date(), z.string().datetime()]).nullable(),
+  lastAttemptAt: z.union([z.date(), z.string().datetime()]).nullable(),
+  outcome: z.enum(ISSUE_RECOVERY_ACTION_OUTCOMES).nullable(),
+  resolutionNote: z.string().nullable(),
+  resolvedAt: z.union([z.date(), z.string().datetime()]).nullable(),
+  createdAt: z.union([z.date(), z.string().datetime()]),
+  updatedAt: z.union([z.date(), z.string().datetime()]),
+});
+
+export type IssueRecoveryActionReadModel = z.infer<typeof issueRecoveryActionReadModelSchema>;
 
 const issueRequestDepthInputSchema = z
   .number()
