@@ -12,6 +12,7 @@ import {
   agentWakeupRequests,
   approvals,
   companies,
+  issueComments,
   heartbeatRunEvents,
   heartbeatRunWatchdogDecisions,
   heartbeatRuns,
@@ -1661,6 +1662,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         issueId: input.issue.id,
         taskId: input.issue.id,
         wakeReason: "source_scoped_recovery_action",
+        skipIssueComment: true,
         source: "issue_recovery_action",
         recoveryActionId: input.action.id,
         sourceIssueId: input.issue.id,
@@ -1844,14 +1846,33 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         "- Next action: a board operator should assign an invokable recovery owner, fix the agent/runtime state, or record an intentional manual resolution.",
       ].join("\n");
 
-    if (notice) {
-      await issuesSvc.addComment(input.issue.id, notice.body, {}, {
-        authorType: "system",
-        presentation: notice.presentation,
-        metadata: notice.metadata,
-      });
-    } else {
-      await issuesSvc.addComment(input.issue.id, `${input.comment ?? ""}${recoveryLine}`, {});
+    if (recoveryAction.attemptCount === 1) {
+      const escalationCommentMarker = `Recovery action: \`${recoveryAction.id}\``;
+
+      const hasEscalationComment = await db
+        .select({ id: issueComments.id, body: issueComments.body })
+        .from(issueComments)
+        .where(
+          and(
+            eq(issueComments.issueId, input.issue.id),
+            eq(issueComments.authorType, "system"),
+          ),
+        )
+        .then((rows) => rows.some((row) => (row.body ?? "").includes(escalationCommentMarker)));
+
+      if (!hasEscalationComment) {
+        if (notice) {
+          await issuesSvc.addComment(input.issue.id, notice.body, {}, {
+            authorType: "system",
+            presentation: notice.presentation,
+            metadata: notice.metadata,
+          });
+        } else {
+          await issuesSvc.addComment(input.issue.id, `${input.comment ?? ""}${recoveryLine}`, {}, {
+            authorType: "system",
+          });
+        }
+      }
     }
 
     await logActivity(db, {
@@ -1890,6 +1911,15 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       latestRun: input.latestRun,
       recoveryCause,
     });
+
+    if (recoveryAction.ownerAgentId === input.issue.assigneeAgentId) {
+      const reblocked = await issuesSvc.update(input.issue.id, {
+        status: "blocked",
+        blockedByIssueIds: blockerIds,
+        assigneeAgentId: recoveryAction.ownerAgentId ?? input.issue.assigneeAgentId,
+      });
+      if (!reblocked) return null;
+    }
 
     return updated;
   }

@@ -174,7 +174,6 @@ describeEmbeddedPostgres("issue recovery actions", () => {
       companyId,
       kind: "stranded_assigned_issue",
       status: "active",
-      ownerAgentId: managerId,
       previousOwnerAgentId: coderId,
       returnOwnerAgentId: coderId,
       cause: "stranded_assigned_issue",
@@ -184,7 +183,6 @@ describeEmbeddedPostgres("issue recovery actions", () => {
     const [updatedIssue] = await db.select().from(issues).where(eq(issues.id, sourceIssue.id));
     expect(updatedIssue).toMatchObject({
       status: "blocked",
-      assigneeAgentId: managerId,
     });
     const recoveryIssues = await db
       .select()
@@ -239,7 +237,6 @@ describeEmbeddedPostgres("issue recovery actions", () => {
       companyId,
       kind: "stranded_assigned_issue",
       status: "active",
-      ownerAgentId: managerId,
       previousOwnerAgentId: coderId,
       returnOwnerAgentId: coderId,
       cause: "stranded_assigned_issue",
@@ -253,6 +250,71 @@ describeEmbeddedPostgres("issue recovery actions", () => {
       strandedRunId: secondLatestRun.id,
       recoveryCause: "stranded_assigned_issue",
     });
+  });
+
+  it("keeps the source issue blocked when source-scoped wakeup is claimed synchronously", async () => {
+    const { companyId, managerId, coderId, sourceIssue } = await seedCompany();
+    await db.update(agents).set({ status: "paused" }).where(eq(agents.id, managerId));
+    const enqueueWakeup = vi.fn(async () => {
+      await db
+        .update(issues)
+        .set({ status: "in_progress" })
+        .where(eq(issues.id, sourceIssue.id));
+      return null;
+    });
+    const recovery = recoveryService(db, { enqueueWakeup });
+    const firstLatestRun = {
+      id: randomUUID(),
+      agentId: coderId,
+      status: "failed",
+      error: "adapter failed",
+      errorCode: "adapter_failed",
+      contextSnapshot: { retryReason: "issue_continuation_needed" },
+      livenessState: "needs_followup",
+    } as const;
+
+    await recovery.escalateStrandedAssignedIssue({
+      issue: sourceIssue,
+      previousStatus: "in_progress",
+      latestRun: firstLatestRun,
+      comment: "Automatic continuation recovery failed.",
+    });
+
+    const [afterFirst] = await db.select().from(issues).where(eq(issues.id, sourceIssue.id));
+    expect(afterFirst?.status).toBe("blocked");
+    expect(afterFirst?.assigneeAgentId).toBe(coderId);
+
+    const secondLatestRun = {
+      ...firstLatestRun,
+      id: randomUUID(),
+    };
+    await recovery.escalateStrandedAssignedIssue({
+      issue: sourceIssue,
+      previousStatus: "in_progress",
+      latestRun: secondLatestRun,
+      comment: "Automatic continuation recovery failed.",
+    });
+
+    const actionRows = await db
+      .select()
+      .from(issueRecoveryActions)
+      .where(eq(issueRecoveryActions.sourceIssueId, sourceIssue.id));
+    expect(actionRows).toHaveLength(1);
+    expect(actionRows[0]).toMatchObject({
+      companyId,
+      kind: "stranded_assigned_issue",
+      status: "active",
+      previousOwnerAgentId: coderId,
+      returnOwnerAgentId: coderId,
+      cause: "stranded_assigned_issue",
+      attemptCount: 2,
+    });
+    const [afterSecond] = await db.select().from(issues).where(eq(issues.id, sourceIssue.id));
+    expect(afterSecond?.status).toBe("blocked");
+
+    const comments = await db.select().from(issueComments).where(eq(issueComments.issueId, sourceIssue.id));
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.body).toContain("Recovery action:");
   });
 
   it("does not create nested recovery artifacts when issue-backed fallback work itself fails", async () => {

@@ -7842,7 +7842,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
         });
         const livenessRun = finalizedRun;
         await refreshContinuationSummaryForRun(livenessRun, agent);
-        if (issueId && outcome === "succeeded") {
+        const skipRunIssueComment = parseObject(livenessRun.contextSnapshot).skipIssueComment === true;
+        if (issueId && outcome === "succeeded" && !skipRunIssueComment) {
           try {
             const existingRunComment = await findRunIssueComment(livenessRun.id, livenessRun.companyId, issueId);
             if (!existingRunComment) {
