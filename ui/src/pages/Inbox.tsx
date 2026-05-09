@@ -54,6 +54,7 @@ import {
 } from "../components/IssueColumns";
 import { IssueFiltersPopover } from "../components/IssueFiltersPopover";
 import { IssueRow } from "../components/IssueRow";
+import { BlockedInboxView } from "../components/BlockedInboxView";
 import { SwipeToArchive } from "../components/SwipeToArchive";
 
 import { StatusIcon } from "../components/StatusIcon";
@@ -682,7 +683,11 @@ export function Inbox() {
 
   const pathSegment = location.pathname.split("/").pop() ?? "mine";
   const tab: InboxTab =
-    pathSegment === "mine" || pathSegment === "recent" || pathSegment === "all" || pathSegment === "unread"
+    pathSegment === "mine"
+    || pathSegment === "recent"
+    || pathSegment === "all"
+    || pathSegment === "unread"
+    || pathSegment === "blocked"
       ? pathSegment
       : "mine";
   const canArchiveFromTab = isMineInboxTab(tab);
@@ -824,6 +829,12 @@ export function Inbox() {
     queryFn: () => heartbeatsApi.list(selectedCompanyId!, undefined, INBOX_HEARTBEAT_RUN_LIMIT),
     enabled: !!selectedCompanyId,
   });
+  const { data: blockedAttentionCountResponse } = useQuery({
+    queryKey: queryKeys.issues.countBlockedAttention(selectedCompanyId!),
+    queryFn: () => issuesApi.count(selectedCompanyId!, { attention: "blocked" }),
+    enabled: !!selectedCompanyId,
+  });
+  const blockedAttentionCount = blockedAttentionCountResponse?.count ?? 0;
 
   const { data: liveRuns } = useQuery({
     queryKey: queryKeys.liveRuns(selectedCompanyId!),
@@ -1947,6 +1958,22 @@ export function Inbox() {
                 label: "Recent",
               },
               { value: "unread", label: "Unread" },
+              {
+                value: "blocked",
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    Blocked
+                    {blockedAttentionCount > 0 ? (
+                      <span
+                        data-testid="inbox-blocked-tab-badge"
+                        className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium leading-none text-amber-700 dark:text-amber-300"
+                      >
+                        {blockedAttentionCount > 99 ? "99+" : blockedAttentionCount}
+                      </span>
+                    ) : null}
+                  </span>
+                ),
+              },
               { value: "all", label: "All" },
             ]}
           />
@@ -2131,11 +2158,21 @@ export function Inbox() {
       {approvalsError && <p className="text-sm text-destructive">{approvalsError.message}</p>}
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
-      {!allLoaded && visibleSections.length === 0 && (
+      {tab === "blocked" ? (
+        <BlockedInboxView
+          companyId={selectedCompanyId!}
+          searchQuery={searchQuery}
+          agentNameById={agentById}
+          userLabelById={companyUserLabelMap}
+          issueLinkState={issueLinkState}
+        />
+      ) : null}
+
+      {tab !== "blocked" && !allLoaded && visibleSections.length === 0 && (
         <PageSkeleton variant="inbox" />
       )}
 
-      {allLoaded && visibleSections.length === 0 && (
+      {tab !== "blocked" && allLoaded && visibleSections.length === 0 && (
         <EmptyState
           icon={searchQuery.trim() ? Search : InboxIcon}
           message={
@@ -2152,7 +2189,7 @@ export function Inbox() {
         />
       )}
 
-      {showWorkItemsSection && (
+      {tab !== "blocked" && showWorkItemsSection && (
         <>
           {showSeparatorBefore("work_items") && <Separator />}
           <div>
