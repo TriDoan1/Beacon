@@ -205,6 +205,37 @@ describeEmbeddedPostgres("secretService", () => {
     expect(JSON.stringify(events)).not.toContain("runtime-secret");
   });
 
+  it("returns resolved secrets even when success metadata writes fail", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const secret = await svc.create(companyId, {
+      name: `metadata-write-${randomUUID()}`,
+      provider: "local_encrypted",
+      value: "runtime-secret",
+    });
+    const env = {
+      API_KEY: { type: "secret_ref" as const, secretId: secret.id, version: "latest" as const },
+    };
+    await svc.syncEnvBindingsForTarget(companyId, { targetType: "agent", targetId: "agent-1" }, env);
+
+    vi.spyOn(db, "update").mockImplementationOnce(
+      () => ({
+        set: () => ({
+          where: () => Promise.reject(new Error("metadata write failed")),
+        }),
+      }) as ReturnType<typeof db.update>,
+    );
+
+    const resolved = await svc.resolveEnvBindings(companyId, env, {
+      consumerType: "agent",
+      consumerId: "agent-1",
+      actorType: "agent",
+      actorId: "agent-1",
+    });
+
+    expect(resolved.env.API_KEY).toBe("runtime-secret");
+  });
+
   it("stores external references without requiring or persisting secret values", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);

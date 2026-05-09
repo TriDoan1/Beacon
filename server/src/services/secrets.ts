@@ -528,7 +528,8 @@ export function secretService(db: Db) {
         db
           .update(companySecrets)
           .set({ lastResolvedAt: new Date(), updatedAt: new Date() })
-          .where(eq(companySecrets.id, secret.id)),
+          .where(eq(companySecrets.id, secret.id))
+          .catch(() => undefined),
         recordAccessEvent({
           companyId,
           secretId: secret.id,
@@ -536,7 +537,7 @@ export function secretService(db: Db) {
           provider: providerId,
           context,
           outcome: "success",
-        }),
+        }).catch(() => undefined),
       ]);
       return {
         value,
