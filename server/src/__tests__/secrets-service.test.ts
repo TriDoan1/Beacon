@@ -724,6 +724,64 @@ describeEmbeddedPostgres("secretService", () => {
     }));
   });
 
+  it("keeps a local cleanup handle when create rollback cleanup fails", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const awsVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS production",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    const prepared = {
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/create-cleanup-handle",
+        versionId: "aws-version-1",
+        source: "managed",
+      },
+      valueSha256: "value-sha-1",
+      fingerprintSha256: "fingerprint-sha-1",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/create-cleanup-handle",
+      providerVersionRef: "aws-version-1",
+    };
+    vi.spyOn(awsSecretsManagerProvider, "createSecret").mockResolvedValue(prepared);
+    vi.spyOn(awsSecretsManagerProvider, "deleteOrArchive").mockRejectedValue(
+      new Error("cleanup failed"),
+    );
+    vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("db activate failed"));
+
+    await expect(
+      svc.create(companyId, {
+        name: "Create Cleanup Handle",
+        key: "create-cleanup-handle",
+        provider: "aws_secrets_manager",
+        providerConfigId: awsVault.id,
+        value: "runtime-secret",
+      }),
+    ).rejects.toThrow("db activate failed");
+
+    const persisted = await svc.getByName(companyId, "Create Cleanup Handle");
+    expect(persisted).toMatchObject({
+      key: "create-cleanup-handle",
+      status: "archived",
+      externalRef: prepared.externalRef,
+      latestVersion: 1,
+    });
+
+    const version = await db
+      .select()
+      .from(companySecretVersions)
+      .where(eq(companySecretVersions.secretId, persisted!.id))
+      .then((rows) => rows[0] ?? null);
+    expect(version).toMatchObject({
+      version: 1,
+      status: "disabled",
+      material: prepared.material,
+    });
+  });
+
   it("archives managed provider versions when rotate persistence fails", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);
@@ -787,6 +845,76 @@ describeEmbeddedPostgres("secretService", () => {
         version: 2,
       },
     }));
+  });
+
+  it("keeps a disabled version cleanup handle when rotate rollback cleanup fails", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const awsVault = await svc.createProviderConfig(companyId, {
+      provider: "aws_secrets_manager",
+      displayName: "AWS production",
+      config: { region: "us-east-1", namespace: "prod-use1" },
+    });
+    vi.spyOn(awsSecretsManagerProvider, "createSecret").mockResolvedValue({
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-cleanup-handle",
+        versionId: "aws-version-1",
+        source: "managed",
+      },
+      valueSha256: "value-sha-1",
+      fingerprintSha256: "fingerprint-sha-1",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-cleanup-handle",
+      providerVersionRef: "aws-version-1",
+    });
+    const secret = await svc.create(companyId, {
+      name: "Rotate Cleanup Handle",
+      key: "rotate-cleanup-handle",
+      provider: "aws_secrets_manager",
+      providerConfigId: awsVault.id,
+      value: "runtime-secret",
+    });
+    const prepared = {
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId:
+          "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-cleanup-handle",
+        versionId: "aws-version-2",
+        source: "managed",
+      },
+      valueSha256: "value-sha-2",
+      fingerprintSha256: "fingerprint-sha-2",
+      externalRef:
+        "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company/rotate-cleanup-handle",
+      providerVersionRef: "aws-version-2",
+    };
+    vi.spyOn(awsSecretsManagerProvider, "createVersion").mockResolvedValue(prepared);
+    vi.spyOn(awsSecretsManagerProvider, "deleteOrArchive").mockRejectedValue(
+      new Error("cleanup failed"),
+    );
+    vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("db rotate failed"));
+
+    await expect(svc.rotate(secret.id, { value: "rotated-runtime-secret" })).rejects.toThrow(
+      "db rotate failed",
+    );
+
+    const persisted = await svc.getById(secret.id);
+    expect(persisted?.latestVersion).toBe(1);
+
+    const versions = await db
+      .select()
+      .from(companySecretVersions)
+      .where(eq(companySecretVersions.secretId, secret.id));
+    expect(versions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ version: 1, status: "current" }),
+      expect.objectContaining({
+        version: 2,
+        status: "disabled",
+        material: prepared.material,
+      }),
+    ]));
   });
 
   it("rejects generic provider vault reassignment for managed secrets", async () => {

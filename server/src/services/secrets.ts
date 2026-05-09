@@ -139,7 +139,7 @@ async function cleanupPreparedProviderWrite(input: {
   context: SecretProviderWriteContext;
   mode: "archive" | "delete";
   operation: string;
-}) {
+}): Promise<boolean> {
   try {
     await input.provider.deleteOrArchive({
       material: input.prepared.material,
@@ -148,6 +148,7 @@ async function cleanupPreparedProviderWrite(input: {
       context: input.context,
       mode: input.mode,
     });
+    return true;
   } catch (cleanupError) {
     logger.warn(
       {
@@ -159,6 +160,7 @@ async function cleanupPreparedProviderWrite(input: {
       },
       "remote secret provider cleanup failed after db write failure",
     );
+    return false;
   }
 }
 
@@ -1502,61 +1504,115 @@ export function secretService(db: Db) {
         secretName: input.name,
         version: 1,
       };
-      const prepared =
-        managedMode === "external_reference"
-          ? await provider.linkExternalSecret({
-              externalRef: input.externalRef ?? "",
-              providerVersionRef: input.providerVersionRef ?? null,
-              providerConfig,
-              context: providerWriteContext,
-            })
-          : await provider.createSecret({
-              value: input.value ?? "",
-              externalRef: null,
-              providerConfig,
-              context: providerWriteContext,
-            });
+      const reservedSecret = await db
+        .insert(companySecrets)
+        .values({
+          companyId,
+          key,
+          name: input.name,
+          provider: input.provider,
+          providerConfigId: input.providerConfigId ?? null,
+          status: "archived",
+          managedMode,
+          externalRef: null,
+          providerMetadata: input.providerMetadata ?? null,
+          latestVersion: 0,
+          description: input.description ?? null,
+          createdByAgentId: actor?.agentId ?? null,
+          createdByUserId: actor?.userId ?? null,
+        })
+        .returning()
+        .then((rows) => rows[0]);
+
+      let prepared: PreparedSecretVersion;
+      try {
+        prepared =
+          managedMode === "external_reference"
+            ? await provider.linkExternalSecret({
+                externalRef: input.externalRef ?? "",
+                providerVersionRef: input.providerVersionRef ?? null,
+                providerConfig,
+                context: providerWriteContext,
+              })
+            : await provider.createSecret({
+                value: input.value ?? "",
+                externalRef: null,
+                providerConfig,
+                context: providerWriteContext,
+              });
+      } catch (error) {
+        await db.delete(companySecrets).where(eq(companySecrets.id, reservedSecret.id)).catch(() => undefined);
+        throw error;
+      }
+
+      try {
+        await db
+          .update(companySecrets)
+          .set({
+            externalRef: prepared.externalRef,
+            latestVersion: 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(companySecrets.id, reservedSecret.id));
+        await db.insert(companySecretVersions).values({
+          secretId: reservedSecret.id,
+          version: 1,
+          material: prepared.material,
+          valueSha256: prepared.valueSha256,
+          fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
+          providerVersionRef: prepared.providerVersionRef ?? null,
+          status: "disabled",
+          createdByAgentId: actor?.agentId ?? null,
+          createdByUserId: actor?.userId ?? null,
+        });
+      } catch (error) {
+        if (managedMode === "paperclip_managed") {
+          const cleaned = await cleanupPreparedProviderWrite({
+            provider,
+            prepared,
+            providerConfig,
+            context: providerWriteContext,
+            mode: "delete",
+            operation: "create.prepare_rollback",
+          });
+          if (cleaned) {
+            await db.delete(companySecrets).where(eq(companySecrets.id, reservedSecret.id)).catch(() => undefined);
+          }
+        } else {
+          await db.delete(companySecrets).where(eq(companySecrets.id, reservedSecret.id)).catch(() => undefined);
+        }
+        throw error;
+      }
 
       try {
         return await db.transaction(async (tx) => {
+          await tx
+            .update(companySecretVersions)
+            .set({ status: "current" })
+            .where(and(
+              eq(companySecretVersions.secretId, reservedSecret.id),
+              eq(companySecretVersions.version, 1),
+            ));
+
           const secret = await tx
-            .insert(companySecrets)
-            .values({
-              companyId,
-              key,
-              name: input.name,
-              provider: input.provider,
-              providerConfigId: input.providerConfigId ?? null,
+            .update(companySecrets)
+            .set({
               status: "active",
-              managedMode,
               externalRef: prepared.externalRef,
-              providerMetadata: input.providerMetadata ?? null,
               latestVersion: 1,
-              description: input.description ?? null,
               lastRotatedAt: new Date(),
-              createdByAgentId: actor?.agentId ?? null,
-              createdByUserId: actor?.userId ?? null,
+              updatedAt: new Date(),
             })
+            .where(eq(companySecrets.id, reservedSecret.id))
             .returning()
             .then((rows) => rows[0]);
 
-          await tx.insert(companySecretVersions).values({
-            secretId: secret.id,
-            version: 1,
-            material: prepared.material,
-            valueSha256: prepared.valueSha256,
-            fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
-            providerVersionRef: prepared.providerVersionRef ?? null,
-            status: "current",
-            createdByAgentId: actor?.agentId ?? null,
-            createdByUserId: actor?.userId ?? null,
-          });
-
+          if (!secret) throw notFound("Secret not found");
           return secret;
         });
       } catch (error) {
         if (managedMode === "paperclip_managed") {
-          await cleanupPreparedProviderWrite({
+          const cleaned = await cleanupPreparedProviderWrite({
             provider,
             prepared,
             providerConfig,
@@ -1564,6 +1620,11 @@ export function secretService(db: Db) {
             mode: "delete",
             operation: "create.rollback",
           });
+          if (cleaned) {
+            await db.delete(companySecrets).where(eq(companySecrets.id, reservedSecret.id)).catch(() => undefined);
+          }
+        } else {
+          await db.delete(companySecrets).where(eq(companySecrets.id, reservedSecret.id)).catch(() => undefined);
         }
         throw error;
       }
@@ -1623,22 +1684,47 @@ export function secretService(db: Db) {
             });
 
       try {
+        await db.insert(companySecretVersions).values({
+          secretId: secret.id,
+          version: nextVersion,
+          material: prepared.material,
+          valueSha256: prepared.valueSha256,
+          fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
+          providerVersionRef: prepared.providerVersionRef ?? null,
+          status: "disabled",
+          createdByAgentId: actor?.agentId ?? null,
+          createdByUserId: actor?.userId ?? null,
+        });
+      } catch (error) {
+        if (secret.managedMode !== "external_reference") {
+          await cleanupPreparedProviderWrite({
+            provider,
+            prepared,
+            providerConfig,
+            context: providerWriteContext,
+            mode: "archive",
+            operation: "rotate.prepare_rollback",
+          });
+        }
+        throw error;
+      }
+
+      try {
         return await db.transaction(async (tx) => {
           await tx
             .update(companySecretVersions)
             .set({ status: "previous" })
-            .where(eq(companySecretVersions.secretId, secret.id));
-          await tx.insert(companySecretVersions).values({
-            secretId: secret.id,
-            version: nextVersion,
-            material: prepared.material,
-            valueSha256: prepared.valueSha256,
-            fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
-            providerVersionRef: prepared.providerVersionRef ?? null,
-            status: "current",
-            createdByAgentId: actor?.agentId ?? null,
-            createdByUserId: actor?.userId ?? null,
-          });
+            .where(and(
+              eq(companySecretVersions.secretId, secret.id),
+              ne(companySecretVersions.version, nextVersion),
+            ));
+          await tx
+            .update(companySecretVersions)
+            .set({ status: "current" })
+            .where(and(
+              eq(companySecretVersions.secretId, secret.id),
+              eq(companySecretVersions.version, nextVersion),
+            ));
 
           const updated = await tx
             .update(companySecrets)
@@ -1658,7 +1744,7 @@ export function secretService(db: Db) {
         });
       } catch (error) {
         if (secret.managedMode !== "external_reference") {
-          await cleanupPreparedProviderWrite({
+          const cleaned = await cleanupPreparedProviderWrite({
             provider,
             prepared,
             providerConfig,
@@ -1666,6 +1752,15 @@ export function secretService(db: Db) {
             mode: "archive",
             operation: "rotate.rollback",
           });
+          if (cleaned) {
+            await db
+              .delete(companySecretVersions)
+              .where(and(
+                eq(companySecretVersions.secretId, secret.id),
+                eq(companySecretVersions.version, nextVersion),
+              ))
+              .catch(() => undefined);
+          }
         }
         throw error;
       }
