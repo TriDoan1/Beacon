@@ -1635,35 +1635,41 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       lastAttemptAt: now,
     });
 
-    if (ownerAgentId) {
-      await deps.enqueueWakeup(ownerAgentId, {
-        source: "assignment",
-        triggerDetail: "system",
-        reason: "source_scoped_recovery_action",
-        idempotencyKey: `source_scoped_recovery_action:${action.id}:${action.attemptCount}`,
-        payload: withRecoveryModelProfileHint({
-          issueId: input.issue.id,
-          sourceIssueId: input.issue.id,
-          recoveryActionId: action.id,
-          strandedRunId: input.latestRun?.id ?? null,
-          recoveryCause,
-        }),
-        requestedByActorType: "system",
-        requestedByActorId: null,
-        contextSnapshot: withRecoveryModelProfileHint({
-          issueId: input.issue.id,
-          taskId: input.issue.id,
-          wakeReason: "source_scoped_recovery_action",
-          source: "issue_recovery_action",
-          recoveryActionId: action.id,
-          sourceIssueId: input.issue.id,
-          strandedRunId: input.latestRun?.id ?? null,
-          recoveryCause,
-        }),
-      });
-    }
-
     return action;
+  }
+
+  async function enqueueSourceScopedStrandedRecoveryWake(input: {
+    action: Awaited<ReturnType<typeof recoveryActionsSvc.upsertSourceScoped>>;
+    issue: typeof issues.$inferSelect;
+    latestRun: LatestIssueRun;
+    recoveryCause: StrandedRecoveryCause;
+  }) {
+    if (!input.action.ownerAgentId) return;
+    await deps.enqueueWakeup(input.action.ownerAgentId, {
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "source_scoped_recovery_action",
+      idempotencyKey: `source_scoped_recovery_action:${input.action.id}:${input.action.attemptCount}`,
+      payload: withRecoveryModelProfileHint({
+        issueId: input.issue.id,
+        sourceIssueId: input.issue.id,
+        recoveryActionId: input.action.id,
+        strandedRunId: input.latestRun?.id ?? null,
+        recoveryCause: input.recoveryCause,
+      }),
+      requestedByActorType: "system",
+      requestedByActorId: null,
+      contextSnapshot: withRecoveryModelProfileHint({
+        issueId: input.issue.id,
+        taskId: input.issue.id,
+        wakeReason: "source_scoped_recovery_action",
+        source: "issue_recovery_action",
+        recoveryActionId: input.action.id,
+        sourceIssueId: input.issue.id,
+        strandedRunId: input.latestRun?.id ?? null,
+        recoveryCause: input.recoveryCause,
+      }),
+    });
   }
 
   function buildRecoveryIssueInPlaceEscalationComment(input: {
@@ -1790,11 +1796,12 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       });
     }
 
+    const recoveryCause = input.recoveryCause ?? "stranded_assigned_issue";
     const recoveryAction = await ensureSourceScopedStrandedRecoveryAction({
       issue: input.issue,
       previousStatus: input.previousStatus,
       latestRun: input.latestRun,
-      recoveryCause: input.recoveryCause,
+      recoveryCause,
       successfulRunHandoffEvidence: input.successfulRunHandoffEvidence,
     });
     const blockerIds = await existingUnresolvedBlockerIssueIds(input.issue.companyId, input.issue.id);
@@ -1818,6 +1825,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         correctiveRun: input.latestRun ? { id: input.latestRun.id, status: input.latestRun.status } : null,
         sourceAssignee,
         recoveryIssue: null,
+        recoveryActionId: recoveryAction.id,
         recoveryOwner,
         latestIssueStatus: input.issue.status,
         latestHandoffRunStatus: input.latestRun?.status ?? "unknown",
@@ -1876,6 +1884,13 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
         returnOwnerAgentId: recoveryAction.returnOwnerAgentId,
         blockerIssueIds: blockerIds,
       },
+    });
+
+    await enqueueSourceScopedStrandedRecoveryWake({
+      action: recoveryAction,
+      issue: input.issue,
+      latestRun: input.latestRun,
+      recoveryCause,
     });
 
     return updated;
