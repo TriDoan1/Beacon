@@ -133,6 +133,73 @@ describe("SidebarSection", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("does not apply hover background classes to static section labels", async () => {
+    const currentRoot = createRoot(container);
+    root = currentRoot;
+
+    await act(async () => {
+      currentRoot.render(
+        <SidebarSection label="Work">
+          <a href="/issues">Issues</a>
+        </SidebarSection>,
+      );
+    });
+    await flushReact();
+
+    const workLabel = Array.from(container.querySelectorAll("span"))
+      .find((element) => element.textContent === "Work");
+    const staticLabelControl = workLabel?.parentElement;
+
+    expect(staticLabelControl?.tagName).toBe("DIV");
+    expect(staticLabelControl?.getAttribute("class")).not.toContain("hover:bg-accent/50");
+    expect(staticLabelControl?.getAttribute("class")).not.toContain("focus-visible:bg-accent/50");
+  });
+
+  it("keeps the header action outside the label menu hit area", async () => {
+    const onAction = vi.fn();
+    const currentRoot = createRoot(container);
+    root = currentRoot;
+
+    await act(async () => {
+      currentRoot.render(
+        <SidebarSection
+          label="Projects"
+          menu={{
+            ariaLabel: "Projects section actions",
+            actions: [{ type: "item", label: "Browse projects", href: "/projects" }],
+          }}
+          headerAction={{
+            ariaLabel: "New project",
+            icon: Plus,
+            onClick: onAction,
+          }}
+        >
+          <a href="/projects">Projects</a>
+        </SidebarSection>,
+      );
+    });
+    await flushReact();
+
+    const sectionMenuTrigger = container.querySelector('button[aria-label="Projects section actions"]');
+    const newProjectButton = container.querySelector('button[aria-label="New project"]');
+
+    expect(sectionMenuTrigger?.textContent).toContain("Projects");
+    expect(sectionMenuTrigger?.querySelector("svg")).toBeNull();
+    expect(sectionMenuTrigger?.getAttribute("class")).toContain("hover:bg-accent/50");
+    expect(newProjectButton).toBeTruthy();
+
+    await act(async () => {
+      newProjectButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flushReact();
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain("Browse projects");
+
+    await openSectionMenu(container);
+    expect(document.body.textContent).toContain("Browse projects");
+  });
+
   it("renders configured menu actions and radio choices", async () => {
     const onAction = vi.fn();
     const onRadioValueChange = vi.fn();

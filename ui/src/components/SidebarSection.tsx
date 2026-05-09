@@ -95,7 +95,11 @@ function SidebarSectionHeader({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center py-0.5 text-left outline-none"
+          className={cn(
+            "inline-flex min-w-0 max-w-full items-center rounded-md px-1 py-0.5 text-left outline-none transition-colors",
+            "hover:bg-accent/50 focus-visible:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+            menuOpen && "bg-accent/50",
+          )}
           aria-label={menu?.ariaLabel ?? `${label} actions`}
         >
           {headerContent}
@@ -142,18 +146,12 @@ function SidebarSectionHeader({
       </DropdownMenuContent>
     </DropdownMenu>
   ) : (
-    <div className="flex min-w-0 flex-1 items-center py-0.5">{headerContent}</div>
+    <div className="inline-flex min-w-0 max-w-full items-center px-1 py-0.5">{headerContent}</div>
   );
 
   return (
     <div className="group/sidebar-section px-3 py-1.5">
-      <div
-        className={cn(
-          "relative flex min-h-6 items-center gap-1 rounded-md px-1 transition-colors",
-          "hover:bg-accent/50 focus-within:bg-accent/50",
-          menuOpen && "bg-accent/50",
-        )}
-      >
+      <div className="relative flex min-h-6 min-w-0 items-center gap-1">
         {collapsible ? (
           <CollapsibleTrigger asChild>
             <button
