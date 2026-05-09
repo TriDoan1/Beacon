@@ -18,6 +18,7 @@ const mockSecretService = vi.hoisted(() => ({
   getById: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  remove: vi.fn(),
   previewRemoteImport: vi.fn(),
   importRemoteSecrets: vi.fn(),
 }));
@@ -417,5 +418,37 @@ describe("secret routes", () => {
     );
     expect(mockLogActivity).not.toHaveBeenCalled();
     expect(JSON.stringify(mockLogActivity.mock.calls)).not.toContain("shared/repointed");
+  });
+
+  it("allows DELETE to retry cleanup for already soft-deleted secrets", async () => {
+    const secret = {
+      id: "33333333-3333-4333-8333-333333333333",
+      companyId: "company-1",
+      name: "OpenAI API Key__deleted__33333333-3333-4333-8333-333333333333",
+      key: "openai-api-key__deleted__33333333-3333-4333-8333-333333333333",
+      provider: "aws_secrets_manager",
+      managedMode: "paperclip_managed",
+      status: "deleted",
+    };
+    mockSecretService.getById.mockResolvedValue(secret);
+    mockSecretService.remove.mockResolvedValue(secret);
+
+    const res = await request(createApp()).delete(
+      "/api/secrets/33333333-3333-4333-8333-333333333333",
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(mockSecretService.remove).toHaveBeenCalledWith(
+      "33333333-3333-4333-8333-333333333333",
+    );
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "secret.deleted",
+        companyId: "company-1",
+        entityId: secret.id,
+      }),
+    );
   });
 });

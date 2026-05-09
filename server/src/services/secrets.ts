@@ -1944,16 +1944,18 @@ export function secretService(db: Db) {
       const versionRow = await getSecretVersion(secret.id, secret.latestVersion);
       const providerId = secret.provider as SecretProvider;
       const provider = getSecretProvider(providerId);
-      await db
-        .update(companySecrets)
-        .set({
-          key: `${secret.key}__deleted__${secret.id}`,
-          name: `${secret.name}__deleted__${secret.id}`,
-          status: "deleted",
-          deletedAt: secret.deletedAt ?? new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(companySecrets.id, secretId));
+      if (secret.status !== "deleted") {
+        await db
+          .update(companySecrets)
+          .set({
+            key: `${secret.key}__deleted__${secret.id}`,
+            name: `${secret.name}__deleted__${secret.id}`,
+            status: "deleted",
+            deletedAt: secret.deletedAt ?? new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(companySecrets.id, secretId));
+      }
       const providerConfig = secret.providerConfigId
         ? await getProviderConfigById(secret.providerConfigId)
         : null;
