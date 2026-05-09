@@ -748,7 +748,15 @@ class AwsSecretsManagerJsonGateway implements AwsSecretsManagerGateway {
     if (!response.ok) {
       const code = String(parsed.__type ?? parsed.code ?? parsed.Code ?? response.statusText ?? "UnknownError");
       const message = String(parsed.message ?? parsed.Message ?? code);
-      throw new Error(`${code}: ${message}`);
+      const rawMessage = `${code}: ${message}`;
+      const clientCode = classifyAwsProviderError(rawMessage);
+      throw new SecretProviderClientError({
+        code: clientCode,
+        provider: "aws_secrets_manager",
+        operation,
+        message: awsProviderSafeMessage(clientCode),
+        rawMessage,
+      });
     }
 
     return parsed as T;

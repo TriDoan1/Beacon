@@ -1842,16 +1842,33 @@ export function secretService(db: Db) {
         });
       }
 
+      const pathPrefixes = [...new Set(normalizedRefs.map((ref) => ref.configPath.split(".")[0]))];
+
       await db.transaction(async (tx) => {
-        await tx
-          .delete(companySecretBindings)
-          .where(
-            and(
-              eq(companySecretBindings.companyId, companyId),
-              eq(companySecretBindings.targetType, target.targetType),
-              eq(companySecretBindings.targetId, target.targetId),
-            ),
-          );
+        if (pathPrefixes.length > 0) {
+          for (const pathPrefix of pathPrefixes) {
+            await tx
+              .delete(companySecretBindings)
+              .where(
+                and(
+                  eq(companySecretBindings.companyId, companyId),
+                  eq(companySecretBindings.targetType, target.targetType),
+                  eq(companySecretBindings.targetId, target.targetId),
+                  like(companySecretBindings.configPath, `${pathPrefix}.%`),
+                ),
+              );
+          }
+        } else {
+          await tx
+            .delete(companySecretBindings)
+            .where(
+              and(
+                eq(companySecretBindings.companyId, companyId),
+                eq(companySecretBindings.targetType, target.targetType),
+                eq(companySecretBindings.targetId, target.targetId),
+              ),
+            );
+        }
         if (normalizedRefs.length === 0) return;
         await tx.insert(companySecretBindings).values(
           normalizedRefs.map((ref) => ({
