@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, ne, notInArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   agents,
@@ -1902,6 +1902,7 @@ export function secretService(db: Db) {
               eq(companySecretBindings.companyId, companyId),
               eq(companySecretBindings.targetType, target.targetType),
               eq(companySecretBindings.targetId, target.targetId),
+              like(companySecretBindings.configPath, `${pathPrefix}.%`),
             ),
           );
         if (refs.length === 0) return;

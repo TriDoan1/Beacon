@@ -205,6 +205,47 @@ describeEmbeddedPostgres("secretService", () => {
     expect(JSON.stringify(events)).not.toContain("runtime-secret");
   });
 
+  it("scopes env binding sync deletes to the env path prefix", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const runtimeSecret = await svc.create(companyId, {
+      name: `runtime-ref-${randomUUID()}`,
+      provider: "local_encrypted",
+      value: "runtime-secret",
+    });
+    const envSecret = await svc.create(companyId, {
+      name: `env-ref-${randomUUID()}`,
+      provider: "local_encrypted",
+      value: "env-secret",
+    });
+
+    await svc.createBinding({
+      companyId,
+      secretId: runtimeSecret.id,
+      targetType: "agent",
+      targetId: "agent-1",
+      configPath: "runtime.token",
+    });
+    await svc.syncEnvBindingsForTarget(
+      companyId,
+      { targetType: "agent", targetId: "agent-1" },
+      {
+        API_KEY: { type: "secret_ref", secretId: envSecret.id, version: "latest" },
+      },
+    );
+    await svc.syncEnvBindingsForTarget(
+      companyId,
+      { targetType: "agent", targetId: "agent-1" },
+      {},
+    );
+
+    const bindings = await db
+      .select()
+      .from(companySecretBindings)
+      .where(eq(companySecretBindings.targetId, "agent-1"));
+    expect(bindings.map((binding) => binding.configPath)).toEqual(["runtime.token"]);
+  });
+
   it("returns resolved secrets even when success metadata writes fail", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);
