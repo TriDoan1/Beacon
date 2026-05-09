@@ -1880,18 +1880,24 @@ export function secretService(db: Db) {
           ? toProviderVaultRuntimeConfig(providerConfig)
           : null;
       if (!secret.providerConfigId || providerRuntimeConfig) {
-        await provider.deleteOrArchive({
-          material: versionRow?.material as Record<string, unknown> | undefined,
-          externalRef: secret.externalRef,
-          providerConfig: providerRuntimeConfig,
-          context: {
-            companyId: secret.companyId,
-            secretKey: secret.key,
-            secretName: secret.name,
-            version: secret.latestVersion,
-          },
-          mode: "delete",
-        });
+        try {
+          await provider.deleteOrArchive({
+            material: versionRow?.material as Record<string, unknown> | undefined,
+            externalRef: secret.externalRef,
+            providerConfig: providerRuntimeConfig,
+            context: {
+              companyId: secret.companyId,
+              secretKey: secret.key,
+              secretName: secret.name,
+              version: secret.latestVersion,
+            },
+            mode: "delete",
+          });
+        } catch (error) {
+          if (!isSecretProviderClientError(error) || error.code !== "not_found") {
+            throw error;
+          }
+        }
       }
       await db.delete(companySecrets).where(eq(companySecrets.id, secretId));
       return secret;

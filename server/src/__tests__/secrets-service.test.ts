@@ -1127,6 +1127,58 @@ describeEmbeddedPostgres("secretService", () => {
     expect(recreated.id).not.toBe(secret.id);
   });
 
+  it("treats missing provider secrets as already removed during removal retry", async () => {
+    const companyId = await seedCompany();
+    const svc = secretService(db);
+    const externalRef =
+      "arn:aws:secretsmanager:us-east-1:123456789012:secret:paperclip/prod-use1/company-1/retry-delete";
+    const secretId = randomUUID();
+    await db.insert(companySecrets).values({
+      id: secretId,
+      companyId,
+      key: `retry-delete__deleted__${secretId}`,
+      name: `Retry Delete__deleted__${secretId}`,
+      provider: "aws_secrets_manager",
+      managedMode: "paperclip_managed",
+      externalRef,
+      latestVersion: 1,
+      status: "deleted",
+      deletedAt: new Date(),
+    });
+    await db.insert(companySecretVersions).values({
+      secretId,
+      version: 1,
+      material: {
+        scheme: "aws_secrets_manager_v1",
+        secretId: externalRef,
+        versionId: "aws-version-1",
+        source: "managed",
+      },
+      valueSha256: "value-sha-1",
+      fingerprintSha256: "fingerprint-sha-1",
+      providerVersionRef: "aws-version-1",
+      status: "current",
+    });
+    const deleteSpy = vi.spyOn(awsSecretsManagerProvider, "deleteOrArchive").mockRejectedValueOnce(
+      new SecretProviderClientError({
+        code: "not_found",
+        provider: "aws_secrets_manager",
+        operation: "delete_secret",
+        message: "Secret not found.",
+      }),
+    );
+
+    await expect(svc.remove(secretId)).resolves.toMatchObject({ id: secretId });
+    const persisted = await db
+      .select()
+      .from(companySecrets)
+      .where(eq(companySecrets.id, secretId))
+      .then((rows) => rows[0] ?? null);
+
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+    expect(persisted).toBeNull();
+  });
+
   it("removes DB rows even when the attached provider vault is disabled", async () => {
     const companyId = await seedCompany();
     const svc = secretService(db);
