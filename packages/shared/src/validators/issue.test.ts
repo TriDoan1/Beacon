@@ -85,6 +85,20 @@ describe("issue validators", () => {
     ).toBe(false);
   });
 
+  it("rejects recovery outcomes that are not supported by the source-scoped resolution endpoint", () => {
+    expect(
+      resolveIssueRecoveryActionSchema.safeParse({
+        outcome: "delegated",
+      }).success,
+    ).toBe(false);
+
+    expect(
+      resolveIssueRecoveryActionSchema.safeParse({
+        outcome: "escalated",
+      }).success,
+    ).toBe(false);
+  });
+
   it("normalizes escaped line breaks in issue comment bodies", () => {
     const parsed = addIssueCommentSchema.parse({
       body: "Progress update\\r\\n\\r\\nNext action.",

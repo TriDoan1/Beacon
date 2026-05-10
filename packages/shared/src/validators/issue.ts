@@ -202,21 +202,19 @@ export const issueRecoveryActionReadModelSchema = z.object({
 
 export type IssueRecoveryActionReadModel = z.infer<typeof issueRecoveryActionReadModelSchema>;
 
+const RESOLVE_ISSUE_RECOVERY_ACTION_OUTCOMES = [
+  "restored",
+  "false_positive",
+  "blocked",
+  "cancelled",
+] as const;
+
 export const resolveIssueRecoveryActionSchema = z.object({
   actionId: z.string().uuid().optional(),
-  outcome: z.enum(ISSUE_RECOVERY_ACTION_OUTCOMES),
+  outcome: z.enum(RESOLVE_ISSUE_RECOVERY_ACTION_OUTCOMES),
   sourceIssueStatus: z.enum(["done", "in_review", "blocked"]).optional().nullable(),
   resolutionNote: multilineTextSchema.optional().nullable(),
 }).strict().superRefine((value, ctx) => {
-  if (value.outcome === "delegated" || value.outcome === "escalated") {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "This recovery outcome is not supported by the source-scoped resolution endpoint",
-      path: ["outcome"],
-    });
-    return;
-  }
-
   if (value.outcome === "restored") {
     if (value.sourceIssueStatus !== "done" && value.sourceIssueStatus !== "in_review") {
       ctx.addIssue({

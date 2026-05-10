@@ -1547,8 +1547,6 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   function strandedRecoveryActionFingerprint(input: {
     issue: typeof issues.$inferSelect;
     recoveryCause: StrandedRecoveryCause;
-    latestRun: LatestIssueRun;
-    successfulRunHandoffEvidence?: SuccessfulRunHandoffRecoveryEvidence | null;
   }) {
     return [
       "source_scoped_recovery",
@@ -1606,8 +1604,6 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       fingerprint: strandedRecoveryActionFingerprint({
         issue: input.issue,
         recoveryCause,
-        latestRun: input.latestRun,
-        successfulRunHandoffEvidence: input.successfulRunHandoffEvidence,
       }),
       evidence: buildStrandedRecoveryActionEvidence({
         issue: input.issue,
