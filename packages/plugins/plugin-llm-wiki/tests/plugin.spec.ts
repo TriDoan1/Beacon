@@ -2821,6 +2821,21 @@ Duplicate headings receive stable suffixes.
       execute.params?.includes("archived"))).toBe(false);
   });
 
+  it("rejects unknown space statuses through update-space", async () => {
+    const harness = createTestHarness({ manifest });
+    await plugin.definition.setup(harness.ctx);
+
+    await expect(harness.performAction("update-space", {
+      companyId: COMPANY_ID,
+      spaceSlug: "default",
+      status: "suspended",
+    })).rejects.toThrow("LLM Wiki space status must be active or archived.");
+    expect(harness.dbExecutes.some((execute) =>
+      execute.sql.includes("UPDATE") &&
+      execute.sql.includes("wiki_spaces") &&
+      execute.params?.includes("suspended"))).toBe(false);
+  });
+
   it("omits archived spaces from the spaces data API", async () => {
     const harness = createTestHarness({ manifest });
     const activeRow = wikiSpaceRow({

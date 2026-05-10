@@ -1442,7 +1442,10 @@ export async function createSpace(ctx: PluginContext, input: CreateSpaceInput): 
 export async function updateSpace(ctx: PluginContext, input: UpdateSpaceInput): Promise<{ status: "ok"; space: WikiSpace }> {
   const space = await resolveSpace(ctx, input);
   const nextDisplayName = stringField(input.displayName);
-  const nextStatus = input.status;
+  const nextStatus = input.status ?? null;
+  if (nextStatus !== null && nextStatus !== "active" && nextStatus !== "archived") {
+    throw new Error("LLM Wiki space status must be active or archived.");
+  }
   if (space.slug === DEFAULT_SPACE_SLUG && nextStatus === "archived") {
     throw new Error("The default LLM Wiki space cannot be archived.");
   }
