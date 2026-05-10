@@ -25,6 +25,93 @@ import { recoveryService } from "../services/recovery/service.js";
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
 
+function makeRecoveryActionRow(overrides: Record<string, unknown> = {}) {
+  const now = new Date("2026-05-09T19:30:00.000Z");
+  return {
+    id: randomUUID(),
+    companyId: "company-1",
+    sourceIssueId: "source-1",
+    recoveryIssueId: null,
+    kind: "missing_disposition",
+    status: "active",
+    ownerType: "agent",
+    ownerAgentId: "agent-1",
+    ownerUserId: null,
+    previousOwnerAgentId: null,
+    returnOwnerAgentId: null,
+    cause: "successful_run_missing_issue_disposition",
+    fingerprint: "missing-disposition:fingerprint",
+    evidence: {},
+    nextAction: "Choose a valid issue disposition.",
+    wakePolicy: null,
+    monitorPolicy: null,
+    attemptCount: 1,
+    maxAttempts: null,
+    timeoutAt: null,
+    lastAttemptAt: now,
+    outcome: null,
+    resolutionNote: null,
+    resolvedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+describe("issueRecoveryActionService", () => {
+  it("does not reactivate an action resolved between the active read and update", async () => {
+    const existingRow = makeRecoveryActionRow({ id: "existing-action", attemptCount: 1 });
+    const createdRow = makeRecoveryActionRow({ id: "new-action", attemptCount: 1 });
+    const selectResults = [[existingRow], []];
+
+    const makeSelectQuery = (rows: unknown[]) => ({
+      from() {
+        return this;
+      },
+      where() {
+        return this;
+      },
+      orderBy() {
+        return this;
+      },
+      limit() {
+        return Promise.resolve(rows);
+      },
+    });
+
+    const fakeDb = {
+      select: vi.fn(() => makeSelectQuery(selectResults.shift() ?? [])),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn(() => ({
+            returning: vi.fn(async () => []),
+          })),
+        })),
+      })),
+      insert: vi.fn(() => ({
+        values: vi.fn(() => ({
+          returning: vi.fn(async () => [createdRow]),
+        })),
+      })),
+    };
+
+    const result = await issueRecoveryActionService(fakeDb as never).upsertSourceScoped({
+      companyId: "company-1",
+      sourceIssueId: "source-1",
+      kind: "missing_disposition",
+      ownerType: "agent",
+      ownerAgentId: "agent-1",
+      cause: "successful_run_missing_issue_disposition",
+      fingerprint: "missing-disposition:fingerprint",
+      nextAction: "Choose a valid issue disposition.",
+    });
+
+    expect(result).toMatchObject({ id: "new-action", status: "active" });
+    expect(fakeDb.update).toHaveBeenCalledTimes(1);
+    expect(fakeDb.insert).toHaveBeenCalledTimes(1);
+  });
+});
+
 if (!embeddedPostgresSupport.supported) {
   console.warn(
     `Skipping embedded Postgres issue recovery action tests on this host: ${embeddedPostgresSupport.reason ?? "unsupported environment"}`,

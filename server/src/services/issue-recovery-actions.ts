@@ -10,6 +10,7 @@ import type {
 } from "@paperclipai/shared";
 
 const ACTIVE_RECOVERY_ACTION_STATUSES = ["active", "escalated"] as const satisfies readonly IssueRecoveryActionStatus[];
+const MAX_UPSERT_RETRIES = 3;
 
 type IssueRecoveryActionRow = typeof issueRecoveryActions.$inferSelect;
 
@@ -128,7 +129,24 @@ export function issueRecoveryActionService(db: Db) {
     return result;
   }
 
-  async function upsertSourceScoped(input: UpsertIssueRecoveryActionInput): Promise<IssueRecoveryAction> {
+  async function retryUpsertSourceScoped(
+    input: UpsertIssueRecoveryActionInput,
+    retryCount: number,
+    error?: unknown,
+  ): Promise<IssueRecoveryAction> {
+    if (retryCount >= MAX_UPSERT_RETRIES) {
+      if (error) throw error;
+      throw new Error(
+        `Failed to upsert active recovery action for issue ${input.sourceIssueId} after ${MAX_UPSERT_RETRIES} retries`,
+      );
+    }
+    return upsertSourceScoped(input, retryCount + 1);
+  }
+
+  async function upsertSourceScoped(
+    input: UpsertIssueRecoveryActionInput,
+    retryCount = 0,
+  ): Promise<IssueRecoveryAction> {
     const existing = await getActiveForIssue(input.companyId, input.sourceIssueId);
     const now = new Date();
     const ownerType = input.ownerType ?? (input.ownerAgentId ? "agent" : "board");
@@ -159,8 +177,16 @@ export function issueRecoveryActionService(db: Db) {
           resolvedAt: null,
           updatedAt: now,
         })
-        .where(eq(issueRecoveryActions.id, existing.id))
+        .where(
+          and(
+            eq(issueRecoveryActions.id, existing.id),
+            inArray(issueRecoveryActions.status, [...ACTIVE_RECOVERY_ACTION_STATUSES]),
+          ),
+        )
         .returning();
+      if (!updated) {
+        return retryUpsertSourceScoped(input, retryCount);
+      }
       return toReadModel(updated!);
     }
 
@@ -193,9 +219,7 @@ export function issueRecoveryActionService(db: Db) {
       return toReadModel(created!);
     } catch (error) {
       if (!isUniqueRecoveryActionConflict(error)) throw error;
-      const raced = await getActiveForIssue(input.companyId, input.sourceIssueId);
-      if (!raced) throw error;
-      return upsertSourceScoped(input);
+      return retryUpsertSourceScoped(input, retryCount, error);
     }
   }
 

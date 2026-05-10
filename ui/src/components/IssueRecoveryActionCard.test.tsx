@@ -132,7 +132,8 @@ describe("IssueRecoveryActionCard", () => {
     const section = node.querySelector("section[aria-label]");
     expect(section?.getAttribute("aria-label")).toBe("Recovery action: needed");
     expect(node.textContent).toContain("RECOVERY NEEDED");
-    expect(node.textContent).toContain("missing_disposition");
+    expect(node.textContent).toContain("Missing Disposition");
+    expect(node.textContent).not.toContain("missing_disposition");
     expect(node.textContent).toContain("This issue's run finished, but no next step was chosen.");
     expect(node.textContent).toContain("ClaudeCoder");
     expect(node.textContent).toContain("CodexCoder");

@@ -42,10 +42,10 @@ export interface IssueRecoveryActionCardProps {
 }
 
 const KIND_LABEL: Record<IssueRecoveryActionKind, string> = {
-  missing_disposition: "missing_disposition",
-  stranded_assigned_issue: "stranded_assigned_issue",
-  active_run_watchdog: "active_run_watchdog",
-  issue_graph_liveness: "issue_graph_liveness",
+  missing_disposition: "Missing Disposition",
+  stranded_assigned_issue: "Stranded Issue",
+  active_run_watchdog: "Active Watchdog",
+  issue_graph_liveness: "Graph Liveness",
 };
 
 const KIND_HEADLINE: Record<IssueRecoveryActionKind, string> = {
