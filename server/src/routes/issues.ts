@@ -52,6 +52,7 @@ import { trackAgentTaskCompleted } from "@paperclipai/shared/telemetry";
 import { getTelemetryClient } from "../telemetry.js";
 import type { StorageService } from "../storage/types.js";
 import { validate } from "../middleware/validate.js";
+import { issueRecoveryActionService } from "../services/issue-recovery-actions.js";
 import * as serviceIndex from "../services/index.js";
 import {
   accessService,
@@ -62,7 +63,6 @@ import {
   goalService,
   heartbeatService,
   issueApprovalService,
-  issueRecoveryActionService,
   issueThreadInteractionService,
   ISSUE_LIST_DEFAULT_LIMIT,
   ISSUE_LIST_MAX_LIMIT,
