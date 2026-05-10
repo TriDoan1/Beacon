@@ -5978,7 +5978,8 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
           | "issue_terminal_status"
           | "issue_not_in_progress"
           | "issue_execution_lock_changed"
-          | "issue_review_participant_changed";
+          | "issue_review_participant_changed"
+          | "issue_continuation_waiting_on_review";
         details: Record<string, unknown>;
       };
 
