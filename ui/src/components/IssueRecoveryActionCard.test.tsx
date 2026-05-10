@@ -36,6 +36,13 @@ function render(element: ReactElement) {
   return container;
 }
 
+function click(element: Element | null) {
+  if (!element) throw new Error("Expected element to exist");
+  act(() => {
+    element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
 const ownerAgent: Agent = {
   id: "11111111-1111-1111-1111-111111111111",
   companyId: "company-1",
@@ -157,10 +164,39 @@ describe("IssueRecoveryActionCard", () => {
     expect(node.textContent).toContain("Resolved as restored");
   });
 
-  it("hides false_positive option unless canCancelRecovery is set", () => {
+  it("calls resolve with done and does not offer delegated recovery", () => {
+    const onResolve = vi.fn();
     const node = render(
+      <IssueRecoveryActionCard action={buildAction()} onResolve={onResolve} />,
+    );
+    click(node.querySelector("[data-testid='recovery-action-resolve-trigger']"));
+
+    expect(document.body.textContent).toContain("Mark issue done");
+    expect(document.body.textContent).not.toContain("Delegate follow-up issue");
+    click([...document.body.querySelectorAll("button")].find((button) => button.textContent?.includes("Mark issue done")) ?? null);
+
+    expect(onResolve).toHaveBeenCalledWith("done");
+  });
+
+  it("hides false_positive option unless canCancelRecovery is set", () => {
+    const first = render(
       <IssueRecoveryActionCard action={buildAction()} onResolve={() => {}} />,
     );
-    expect(node.querySelector("[data-testid='recovery-action-resolve-trigger']")).not.toBeNull();
+    click(first.querySelector("[data-testid='recovery-action-resolve-trigger']"));
+    expect(document.body.textContent).not.toContain("Mark false positive");
+
+    act(() => root?.unmount());
+    root = null;
+    container?.remove();
+    container = null;
+
+    const onResolve = vi.fn();
+    const second = render(
+      <IssueRecoveryActionCard action={buildAction()} onResolve={onResolve} canCancelRecovery />,
+    );
+    click(second.querySelector("[data-testid='recovery-action-resolve-trigger']"));
+    expect(document.body.textContent).toContain("Mark false positive");
+    click([...document.body.querySelectorAll("button")].find((button) => button.textContent?.includes("Mark false positive")) ?? null);
+    expect(onResolve).toHaveBeenCalledWith("false_positive");
   });
 });

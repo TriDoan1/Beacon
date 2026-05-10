@@ -5,6 +5,7 @@ import type {
   IssueRecoveryAction,
   IssueRecoveryActionKind,
   IssueRecoveryActionOwnerType,
+  IssueRecoveryActionOutcome,
   IssueRecoveryActionStatus,
 } from "@paperclipai/shared";
 
@@ -31,6 +32,15 @@ export type UpsertIssueRecoveryActionInput = {
   maxAttempts?: number | null;
   timeoutAt?: Date | null;
   lastAttemptAt?: Date | null;
+};
+
+export type ResolveIssueRecoveryActionInput = {
+  companyId: string;
+  sourceIssueId: string;
+  actionId?: string | null;
+  status: Extract<IssueRecoveryActionStatus, "resolved" | "cancelled">;
+  outcome: IssueRecoveryActionOutcome;
+  resolutionNote?: string | null;
 };
 
 function toReadModel(row: IssueRecoveryActionRow): IssueRecoveryAction {
@@ -189,9 +199,39 @@ export function issueRecoveryActionService(db: Db) {
     }
   }
 
+  async function resolveActiveForIssue(
+    input: ResolveIssueRecoveryActionInput,
+    dbOrTx: any = db,
+  ): Promise<IssueRecoveryAction | null> {
+    const now = new Date();
+    const predicates = [
+      eq(issueRecoveryActions.companyId, input.companyId),
+      eq(issueRecoveryActions.sourceIssueId, input.sourceIssueId),
+      inArray(issueRecoveryActions.status, [...ACTIVE_RECOVERY_ACTION_STATUSES]),
+    ];
+    if (input.actionId) {
+      predicates.push(eq(issueRecoveryActions.id, input.actionId));
+    }
+
+    const [updated] = await dbOrTx
+      .update(issueRecoveryActions)
+      .set({
+        status: input.status,
+        outcome: input.outcome,
+        resolutionNote: input.resolutionNote ?? null,
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(and(...predicates))
+      .returning();
+
+    return updated ? toReadModel(updated) : null;
+  }
+
   return {
     getActiveForIssue,
     listActiveForIssues,
+    resolveActiveForIssue,
     upsertSourceScoped,
   };
 }

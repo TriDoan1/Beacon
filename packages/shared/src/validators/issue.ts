@@ -202,6 +202,54 @@ export const issueRecoveryActionReadModelSchema = z.object({
 
 export type IssueRecoveryActionReadModel = z.infer<typeof issueRecoveryActionReadModelSchema>;
 
+export const resolveIssueRecoveryActionSchema = z.object({
+  actionId: z.string().uuid().optional(),
+  outcome: z.enum(ISSUE_RECOVERY_ACTION_OUTCOMES),
+  sourceIssueStatus: z.enum(["done", "in_review", "blocked"]).optional().nullable(),
+  resolutionNote: multilineTextSchema.optional().nullable(),
+}).strict().superRefine((value, ctx) => {
+  if (value.outcome === "delegated" || value.outcome === "escalated") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "This recovery outcome is not supported by the source-scoped resolution endpoint",
+      path: ["outcome"],
+    });
+    return;
+  }
+
+  if (value.outcome === "restored") {
+    if (value.sourceIssueStatus !== "done" && value.sourceIssueStatus !== "in_review") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Restored recovery actions must move the source issue to done or in_review",
+        path: ["sourceIssueStatus"],
+      });
+    }
+    return;
+  }
+
+  if (value.outcome === "blocked") {
+    if (value.sourceIssueStatus !== "blocked") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Blocked recovery actions must move the source issue to blocked",
+        path: ["sourceIssueStatus"],
+      });
+    }
+    return;
+  }
+
+  if (value.sourceIssueStatus !== undefined && value.sourceIssueStatus !== null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "This recovery outcome does not change the source issue status",
+      path: ["sourceIssueStatus"],
+    });
+  }
+});
+
+export type ResolveIssueRecoveryAction = z.infer<typeof resolveIssueRecoveryActionSchema>;
+
 const issueRequestDepthInputSchema = z
   .number()
   .int()

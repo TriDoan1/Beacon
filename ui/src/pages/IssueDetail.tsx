@@ -148,6 +148,7 @@ import {
   type Issue,
   type IssueAttachment,
   type IssueComment,
+  type IssueRecoveryActionOutcome,
   type IssueWorkMode,
   type IssueThreadInteraction,
   type RequestConfirmationInteraction,
@@ -1725,6 +1726,34 @@ export function IssueDetail() {
       }
     },
   });
+  const resolveRecoveryAction = useMutation({
+    mutationFn: (data: {
+      actionId?: string;
+      outcome: IssueRecoveryActionOutcome;
+      sourceIssueStatus?: "done" | "in_review" | "blocked" | null;
+      resolutionNote?: string | null;
+    }) => issuesApi.resolveRecoveryAction(issueId!, data),
+    onSuccess: ({ issue: nextIssue }) => {
+      const issueRefs = new Set<string>([issueId!, nextIssue.id]);
+      if (nextIssue.identifier) issueRefs.add(nextIssue.identifier);
+      mergeIssueResponseIntoCaches(issueRefs, nextIssue);
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.activity(issueId!) });
+      invalidateIssueCollections();
+    },
+    onError: (err) => {
+      pushToast({
+        title: "Recovery resolution failed",
+        body: err instanceof Error ? err.message : "Unable to resolve recovery action",
+        tone: "error",
+      });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.issues.detail(issueId!) });
+      if (selectedCompanyId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(selectedCompanyId) });
+      }
+    },
+  });
   const executeTreeControl = useMutation({
     mutationFn: async () => {
       if (treeControlMode === "resume") {
@@ -2927,25 +2956,24 @@ export function IssueDetail() {
   }, [updateIssue.mutateAsync]);
   const handleResolveRecoveryAction = useCallback(
     (outcome: import("../components/IssueRecoveryActionCard").RecoveryResolveOutcome) => {
+      const actionId = issue?.activeRecoveryAction?.id;
+      if (!actionId) return;
       switch (outcome) {
         case "done":
-          void updateIssue.mutateAsync({ status: "done" });
+          void resolveRecoveryAction.mutateAsync({ actionId, outcome: "restored", sourceIssueStatus: "done" });
           return;
         case "in_review":
-          void updateIssue.mutateAsync({ status: "in_review" });
+          void resolveRecoveryAction.mutateAsync({ actionId, outcome: "restored", sourceIssueStatus: "in_review" });
           return;
         case "blocked":
-          void updateIssue.mutateAsync({ status: "blocked" });
-          return;
-        case "delegated":
-          if (issue) openNewIssue(buildSubIssueDefaultsForViewer(issue, currentUserId));
+          void resolveRecoveryAction.mutateAsync({ actionId, outcome: "blocked", sourceIssueStatus: "blocked" });
           return;
         case "false_positive":
-          void updateIssue.mutateAsync({ status: "cancelled" });
+          void resolveRecoveryAction.mutateAsync({ actionId, outcome: "false_positive" });
           return;
       }
     },
-    [currentUserId, issue, openNewIssue, updateIssue.mutateAsync],
+    [issue, resolveRecoveryAction.mutateAsync],
   );
 
   const treePreviewAffectedIssues = useMemo(

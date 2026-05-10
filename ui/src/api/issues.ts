@@ -12,6 +12,8 @@ import type {
   IssueComment,
   IssueDocument,
   IssueLabel,
+  IssueRecoveryAction,
+  IssueRecoveryActionOutcome,
   IssueRetryNowResponse,
   IssueThreadInteraction,
   IssueTreeControlPreview,
@@ -25,6 +27,11 @@ import { api } from "./client";
 
 export type IssueUpdateResponse = Issue & {
   comment?: IssueComment | null;
+};
+
+export type ResolveRecoveryActionResponse = {
+  issue: Issue;
+  recoveryAction: IssueRecoveryAction;
 };
 
 export const issuesApi = {
@@ -94,6 +101,15 @@ export const issuesApi = {
     api.post<Issue>(`/companies/${companyId}/issues`, data),
   update: (id: string, data: Record<string, unknown>) =>
     api.patch<IssueUpdateResponse>(`/issues/${id}`, data),
+  resolveRecoveryAction: (
+    id: string,
+    data: {
+      actionId?: string;
+      outcome: IssueRecoveryActionOutcome;
+      sourceIssueStatus?: "done" | "in_review" | "blocked" | null;
+      resolutionNote?: string | null;
+    },
+  ) => api.post<ResolveRecoveryActionResponse>(`/issues/${id}/recovery-actions/resolve`, data),
   previewTreeControl: (id: string, data: PreviewIssueTreeControl) =>
     api.post<IssueTreeControlPreview>(`/issues/${id}/tree-control/preview`, data),
   createTreeHold: (id: string, data: CreateIssueTreeHold) =>

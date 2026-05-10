@@ -18,6 +18,7 @@ import {
   createChildIssueSchema,
   createIssueSchema,
   resolveCreateIssueStatusDefault,
+  resolveIssueRecoveryActionSchema,
   feedbackTargetTypeSchema,
   feedbackTraceStatusSchema,
   feedbackVoteValueSchema,
@@ -1751,6 +1752,114 @@ export function issueRoutes(
     res.json({
       active,
       actions: active ? [active] : [],
+    });
+  });
+
+  router.post("/issues/:id/recovery-actions/resolve", validate(resolveIssueRecoveryActionSchema), async (req, res) => {
+    const id = req.params.id as string;
+    const existing = await svc.getById(id);
+    if (!existing) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, existing.companyId);
+    if (!(await assertAgentIssueMutationAllowed(req, res, existing))) return;
+
+    const { actionId, outcome, sourceIssueStatus, resolutionNote } = req.body;
+    if (outcome === "false_positive" || outcome === "cancelled") {
+      assertBoard(req);
+    }
+
+    const actor = getActorInfo(req);
+    const updateFields = sourceIssueStatus ? { status: sourceIssueStatus } : {};
+    await assertAgentInReviewReviewPath({
+      existing,
+      updateFields,
+      actorType: req.actor.type,
+    });
+
+    const actionStatus = outcome === "cancelled" ? "cancelled" : "resolved";
+    const result = await db.transaction(async (tx) => {
+      let issue = existing;
+      if (sourceIssueStatus) {
+        const updatedIssue = await svc.update(
+          id,
+          {
+            status: sourceIssueStatus,
+            actorAgentId: actor.agentId ?? null,
+            actorUserId: actor.actorType === "user" ? actor.actorId : null,
+          },
+          tx,
+        );
+        if (!updatedIssue) throw notFound("Issue not found");
+        issue = updatedIssue;
+      }
+
+      const recoveryAction = await recoveryActionsSvc.resolveActiveForIssue(
+        {
+          companyId: existing.companyId,
+          sourceIssueId: existing.id,
+          actionId: actionId ?? null,
+          status: actionStatus,
+          outcome,
+          resolutionNote: resolutionNote ?? null,
+        },
+        tx,
+      );
+      if (!recoveryAction) throw notFound("Active recovery action not found");
+
+      return { issue, recoveryAction };
+    });
+
+    await routinesSvc.syncRunStatusForIssue(result.issue.id);
+
+    if (sourceIssueStatus && existing.status !== result.issue.status) {
+      await logActivity(db, {
+        companyId: result.issue.companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "issue.updated",
+        entityType: "issue",
+        entityId: result.issue.id,
+        details: {
+          identifier: result.issue.identifier,
+          status: result.issue.status,
+          source: "recovery_action_resolution",
+          recoveryActionId: result.recoveryAction.id,
+          _previous: {
+            status: existing.status,
+          },
+        },
+      });
+    }
+
+    await logActivity(db, {
+      companyId: result.issue.companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "issue.recovery_action_resolved",
+      entityType: "issue",
+      entityId: result.issue.id,
+      details: {
+        identifier: result.issue.identifier,
+        recoveryActionId: result.recoveryAction.id,
+        recoveryActionStatus: result.recoveryAction.status,
+        outcome: result.recoveryAction.outcome,
+        sourceIssueStatus: sourceIssueStatus ?? null,
+        resolutionNote: result.recoveryAction.resolutionNote,
+      },
+    });
+
+    res.json({
+      issue: {
+        ...result.issue,
+        activeRecoveryAction: null,
+      },
+      recoveryAction: result.recoveryAction,
     });
   });
 

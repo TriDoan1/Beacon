@@ -28,7 +28,6 @@ export type RecoveryResolveOutcome =
   | "done"
   | "in_review"
   | "blocked"
-  | "delegated"
   | "false_positive";
 
 export interface IssueRecoveryActionCardProps {
@@ -317,12 +316,7 @@ const RESOLVE_OPTIONS: Array<{
   {
     outcome: "blocked",
     label: "Mark blocked…",
-    description: "Block on a real follow-up issue.",
-  },
-  {
-    outcome: "delegated",
-    label: "Delegate follow-up issue…",
-    description: "Create a child issue and block this one on it.",
+    description: "Resolve recovery by recording that the source issue is blocked.",
   },
   {
     outcome: "false_positive",
