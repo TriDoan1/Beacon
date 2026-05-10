@@ -75,3 +75,8 @@ export { pluginDatabaseNamespaces, pluginMigrations } from "./plugin_database.js
 export { pluginJobs, pluginJobRuns } from "./plugin_jobs.js";
 export { pluginWebhookDeliveries } from "./plugin_webhooks.js";
 export { pluginLogs } from "./plugin_logs.js";
+export { supportEndUsers } from "./support_end_users.js";
+export { supportWidgetConfigs } from "./support_widget_configs.js";
+export { supportSessions } from "./support_sessions.js";
+export { supportMessages } from "./support_messages.js";
+export { supportIntakePackets } from "./support_intake_packets.js";

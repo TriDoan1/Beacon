@@ -38,6 +38,7 @@ export const AGENT_ADAPTER_TYPES = [
   "pi_local",
   "cursor",
   "openclaw_gateway",
+  "concierge",
 ] as const;
 export type AgentAdapterType = (typeof AGENT_ADAPTER_TYPES)[number] | (string & {});
 
@@ -54,6 +55,7 @@ export const AGENT_ROLES = [
   "devops",
   "researcher",
   "general",
+  "support",
 ] as const;
 export type AgentRole = (typeof AGENT_ROLES)[number];
 
@@ -70,6 +72,7 @@ export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
   devops: "DevOps",
   researcher: "Researcher",
   general: "General",
+  support: "Support",
 };
 
 export const AGENT_DEFAULT_MAX_CONCURRENT_RUNS = 20;
@@ -207,6 +210,7 @@ export const ISSUE_ORIGIN_KINDS = [
   "harness_liveness_escalation",
   "issue_productivity_review",
   "stranded_issue_recovery",
+  "support_intake",
 ] as const;
 export type BuiltInIssueOriginKind = (typeof ISSUE_ORIGIN_KINDS)[number];
 export type PluginIssueOriginKind = `plugin:${string}`;

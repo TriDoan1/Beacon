@@ -613,6 +613,43 @@ export type {
   ProviderQuotaResult,
 } from "./types/index.js";
 export { COMPANY_SEARCH_SCOPES } from "./types/index.js";
+export type {
+  SupportSessionTransport,
+  SupportSessionStatus,
+  SupportSessionCloseReason,
+  SupportMessageRole,
+  SupportMessageToolCall,
+  SupportMessageToolResult,
+  SupportMessageTransportMetadata,
+  SupportSessionInitialContext,
+  SupportIntakeBrowserInfo,
+  SupportIntakeConsoleError,
+  SupportIntakeNetworkError,
+  SupportWidgetTheme,
+  SupportTokenClaims,
+  SupportSessionOpenRequest,
+  SupportSessionOpenResponse,
+  SupportSessionTurnRequest,
+  SupportSessionReplayMessage,
+  SupportSessionReplayResponse,
+  SupportIntakePacketBody,
+  SupportConciergeAdapterConfig,
+} from "./types/support.js";
+export {
+  SUPPORT_SESSION_TRANSPORTS,
+  SUPPORT_SESSION_STATUSES,
+  SUPPORT_SESSION_CLOSE_REASONS,
+  SUPPORT_MESSAGE_ROLES,
+  SUPPORT_DEFAULT_MODEL,
+  SUPPORT_DEFAULT_PER_SESSION_USD_CENTS,
+  SUPPORT_DEFAULT_PER_USER_DAILY_USD_CENTS,
+  SUPPORT_DEFAULT_PER_IP_HOURLY_LIMIT,
+  SUPPORT_DEFAULT_MAX_TURNS_PER_SESSION,
+  SUPPORT_INTAKE_TOOL_NAMES,
+  SUPPORT_DEFAULT_SYSTEM_PROMPT,
+  SUPPORT_DEFAULT_GREETING,
+  estimateSupportSessionCostUsdCents,
+} from "./support-constants.js";
 export {
   ISSUE_REFERENCE_IDENTIFIER_RE,
   buildIssueReferenceHref,

@@ -89,6 +89,10 @@ import {
   agentConfigurationDoc as openclawGatewayAgentConfigurationDoc,
   models as openclawGatewayModels,
 } from "@paperclipai/adapter-openclaw-gateway";
+import {
+  agentConfigurationDoc as conciergeAgentConfigurationDoc,
+  models as conciergeModels,
+} from "@paperclipai/adapter-concierge";
 import { listCodexModels, refreshCodexModels } from "./codex-models.js";
 import { listCursorModels } from "./cursor-models.js";
 import {
@@ -323,6 +327,29 @@ const geminiLocalAdapter: ServerAdapterModule = {
   agentConfigurationDoc: geminiAgentConfigurationDoc,
 };
 
+const conciergeAdapter: ServerAdapterModule = {
+  type: "concierge",
+  execute: async () => {
+    // Concierge agents are driven by the /api/support/* live-chat routes,
+    // not by the heartbeat-run pipeline. Heartbeat invocation is a misconfig.
+    throw new Error(
+      "Concierge agents are not heartbeat-driven. Direct end-user traffic " +
+        "to the support widget API; do not invoke this agent via /run.",
+    );
+  },
+  testEnvironment: async () => ({
+    adapterType: "concierge",
+    status: "pass" as const,
+    testedAt: new Date().toISOString(),
+    checks: [],
+  }),
+  models: conciergeModels,
+  supportsLocalAgentJwt: false,
+  supportsInstructionsBundle: false,
+  requiresMaterializedRuntimeSkills: false,
+  agentConfigurationDoc: conciergeAgentConfigurationDoc,
+};
+
 const openclawGatewayAdapter: ServerAdapterModule = {
   type: "openclaw_gateway",
   execute: openclawGatewayExecute,
@@ -460,6 +487,7 @@ function registerBuiltInAdapters() {
     cursorLocalAdapter,
     geminiLocalAdapter,
     openclawGatewayAdapter,
+    conciergeAdapter,
     hermesLocalAdapter,
     processAdapter,
     httpAdapter,
