@@ -37,6 +37,7 @@ import {
   type CompanySearchQuery,
   type CompanySearchResponse,
   type ExecutionWorkspace,
+  type IssueRelationIssueSummary,
   type SuccessfulRunHandoffState,
 } from "@paperclipai/shared";
 import { trackAgentTaskCompleted } from "@paperclipai/shared/telemetry";
@@ -404,6 +405,36 @@ async function listSuccessfulRunHandoffStates(
     if (state) states.set(row.entityId, state);
   }
   return states;
+}
+
+type RecoveryActionsLister = {
+  listActiveForIssues: (
+    companyId: string,
+    sourceIssueIds: string[],
+  ) => Promise<Map<string, NonNullable<IssueRelationIssueSummary["activeRecoveryAction"]>>>;
+};
+
+async function annotateRelationSummariesWithRecoveryActions(
+  recoveryActionsSvc: RecoveryActionsLister,
+  companyId: string,
+  relations: { blockedBy: IssueRelationIssueSummary[]; blocks: IssueRelationIssueSummary[] },
+) {
+  const candidates: IssueRelationIssueSummary[] = [];
+  const visit = (summary: IssueRelationIssueSummary) => {
+    candidates.push(summary);
+    for (const terminal of summary.terminalBlockers ?? []) {
+      visit(terminal);
+    }
+  };
+  for (const blocker of relations.blockedBy) visit(blocker);
+  for (const blocking of relations.blocks) visit(blocking);
+  if (candidates.length === 0) return;
+  const ids = [...new Set(candidates.map((summary) => summary.id))];
+  const map = await recoveryActionsSvc.listActiveForIssues(companyId, ids);
+  for (const summary of candidates) {
+    const action = map.get(summary.id) ?? null;
+    if (action) summary.activeRecoveryAction = action;
+  }
 }
 
 const ACTIVE_REVIEW_APPROVAL_STATUSES = new Set(["pending", "revision_requested"]);
@@ -1449,14 +1480,15 @@ export function issueRoutes(
       limit,
       offset,
     });
-    const handoffStates = await listSuccessfulRunHandoffStates(
-      db,
-      companyId,
-      result.map((issue) => issue.id),
-    );
+    const issueIds = result.map((issue) => issue.id);
+    const [handoffStates, recoveryActionByIssue] = await Promise.all([
+      listSuccessfulRunHandoffStates(db, companyId, issueIds),
+      recoveryActionsSvc.listActiveForIssues(companyId, issueIds),
+    ]);
     res.json(result.map((issue) => ({
       ...issue,
       successfulRunHandoff: handoffStates.get(issue.id) ?? null,
+      activeRecoveryAction: recoveryActionByIssue.get(issue.id) ?? null,
     })));
   });
 
@@ -1559,6 +1591,11 @@ export function issueRoutes(
         currentExecutionWorkspacePromise,
         recoveryActionsSvc.getActiveForIssue(issue.companyId, issue.id),
       ]);
+    await annotateRelationSummariesWithRecoveryActions(
+      recoveryActionsSvc,
+      issue.companyId,
+      relations,
+    );
 
     res.json({
       issue: {
@@ -1668,6 +1705,11 @@ export function issueRoutes(
       svc.getCurrentScheduledRetry(issue.id),
       recoveryActionsSvc.getActiveForIssue(issue.companyId, issue.id),
     ]);
+    await annotateRelationSummariesWithRecoveryActions(
+      recoveryActionsSvc,
+      issue.companyId,
+      relations,
+    );
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
       : [];

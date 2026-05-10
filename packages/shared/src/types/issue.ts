@@ -135,6 +135,7 @@ export interface IssueRelationIssueSummary {
   assigneeAgentId: string | null;
   assigneeUserId: string | null;
   terminalBlockers?: IssueRelationIssueSummary[];
+  activeRecoveryAction?: IssueRecoveryAction | null;
 }
 
 export type IssueBlockerAttentionState = "none" | "covered" | "stalled" | "needs_attention";

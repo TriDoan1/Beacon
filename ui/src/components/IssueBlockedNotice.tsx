@@ -1,9 +1,67 @@
-import type { IssueBlockerAttention, IssueRelationIssueSummary, SuccessfulRunHandoffState } from "@paperclipai/shared";
-import { AlertTriangle, Flag } from "lucide-react";
+import type {
+  IssueBlockerAttention,
+  IssueRecoveryAction,
+  IssueRelationIssueSummary,
+  SuccessfulRunHandoffState,
+} from "@paperclipai/shared";
+import { AlertTriangle, Eye, Flag, OctagonAlert, RefreshCw, TriangleAlert } from "lucide-react";
 import { Link } from "@/lib/router";
 import { createIssueDetailPath } from "../lib/issueDetailBreadcrumb";
 import { IssueLinkQuicklook } from "./IssueLinkQuicklook";
 import { isAssignedBacklogBlocker } from "../lib/issue-blockers";
+
+type BlockerRecoveryState = "needed" | "in_progress" | "observe_only" | "escalated";
+
+function blockerRecoveryStateFor(action: IssueRecoveryAction): BlockerRecoveryState | null {
+  if (action.status === "resolved" || action.status === "cancelled") return null;
+  if (action.status === "escalated") return "escalated";
+  if (action.kind === "active_run_watchdog") return "observe_only";
+  if (action.outcome === "delegated") return "in_progress";
+  return "needed";
+}
+
+const BLOCKER_RECOVERY_TONE: Record<BlockerRecoveryState, { icon: typeof TriangleAlert; label: string; className: string }> = {
+  needed: {
+    icon: TriangleAlert,
+    label: "Recovery needed",
+    className: "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  },
+  in_progress: {
+    icon: RefreshCw,
+    label: "Recovery in progress",
+    className: "border-sky-500/60 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+  },
+  observe_only: {
+    icon: Eye,
+    label: "Observing active run",
+    className: "border-border bg-muted text-muted-foreground",
+  },
+  escalated: {
+    icon: OctagonAlert,
+    label: "Recovery escalated",
+    className: "border-red-500/60 bg-red-500/15 text-red-700 dark:text-red-300",
+  },
+};
+
+function BlockerRecoveryIndicator({ action }: { action: IssueRecoveryAction }) {
+  const state = blockerRecoveryStateFor(action);
+  if (!state) return null;
+  const tone = BLOCKER_RECOVERY_TONE[state];
+  const Icon = tone.icon;
+  return (
+    <span
+      data-testid="issue-blocked-notice-recovery-indicator"
+      data-recovery-state={state}
+      role="status"
+      aria-label={tone.label}
+      title={`${tone.label} — open the source issue to act.`}
+      className={`inline-flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${tone.className}`}
+    >
+      <Icon className="h-2.5 w-2.5" aria-hidden />
+      {tone.label}
+    </span>
+  );
+}
 
 export function IssueBlockedNotice({
   issueStatus,
@@ -69,6 +127,7 @@ export function IssueBlockedNotice({
 
   const renderBlockerChip = (blocker: IssueRelationIssueSummary) => {
     const issuePathId = blocker.identifier ?? blocker.id;
+    const recoveryAction = blocker.activeRecoveryAction ?? null;
     return (
       <IssueLinkQuicklook
         key={blocker.id}
@@ -80,6 +139,7 @@ export function IssueBlockedNotice({
         <span className="max-w-[18rem] truncate font-sans text-[11px] text-amber-800 dark:text-amber-200">
           {blocker.title}
         </span>
+        {recoveryAction ? <BlockerRecoveryIndicator action={recoveryAction} /> : null}
       </IssueLinkQuicklook>
     );
   };
