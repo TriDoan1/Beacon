@@ -239,6 +239,22 @@ export const resolveIssueRecoveryActionSchema = z.object({
     return;
   }
 
+  if (value.outcome === "false_positive") {
+    if (
+      value.sourceIssueStatus !== undefined &&
+      value.sourceIssueStatus !== null &&
+      value.sourceIssueStatus !== "done" &&
+      value.sourceIssueStatus !== "in_review"
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "False-positive recovery actions may only move the source issue to done or in_review",
+        path: ["sourceIssueStatus"],
+      });
+    }
+    return;
+  }
+
   if (value.sourceIssueStatus !== undefined && value.sourceIssueStatus !== null) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

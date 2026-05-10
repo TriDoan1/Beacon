@@ -2181,8 +2181,35 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
   }
 
   async function collectIssueGraphLivenessFindings() {
+    const issueRows = await db
+      .select({
+        id: issues.id,
+        companyId: issues.companyId,
+        identifier: issues.identifier,
+        title: issues.title,
+        status: issues.status,
+        projectId: issues.projectId,
+        goalId: issues.goalId,
+        parentId: issues.parentId,
+        assigneeAgentId: issues.assigneeAgentId,
+        assigneeUserId: issues.assigneeUserId,
+        createdByAgentId: issues.createdByAgentId,
+        createdByUserId: issues.createdByUserId,
+        executionPolicy: issues.executionPolicy,
+        executionState: issues.executionState,
+        monitorNextCheckAt: issues.monitorNextCheckAt,
+        monitorAttemptCount: issues.monitorAttemptCount,
+      })
+      .from(issues)
+      .where(
+        and(
+          isNull(issues.hiddenAt),
+          notInArray(issues.originKind, [RECOVERY_ORIGIN_KINDS.issueGraphLivenessEscalation]),
+        ),
+      );
+    const issueIdsUnderAnalysis = issueRows.map((row) => row.id);
+
     const [
-      issueRows,
       relationRows,
       agentRows,
       activeRunRows,
@@ -2193,32 +2220,6 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
       recoveryIssueRows,
       recoveryActionRows,
     ] = await Promise.all([
-      db
-        .select({
-          id: issues.id,
-          companyId: issues.companyId,
-          identifier: issues.identifier,
-          title: issues.title,
-          status: issues.status,
-          projectId: issues.projectId,
-          goalId: issues.goalId,
-          parentId: issues.parentId,
-          assigneeAgentId: issues.assigneeAgentId,
-          assigneeUserId: issues.assigneeUserId,
-          createdByAgentId: issues.createdByAgentId,
-          createdByUserId: issues.createdByUserId,
-          executionPolicy: issues.executionPolicy,
-          executionState: issues.executionState,
-          monitorNextCheckAt: issues.monitorNextCheckAt,
-          monitorAttemptCount: issues.monitorAttemptCount,
-        })
-        .from(issues)
-        .where(
-          and(
-            isNull(issues.hiddenAt),
-            notInArray(issues.originKind, [RECOVERY_ORIGIN_KINDS.issueGraphLivenessEscalation]),
-          ),
-        ),
       db
         .select({
           companyId: issueRelations.companyId,
@@ -2308,14 +2309,21 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
             notInArray(issues.status, ["done", "cancelled"]),
           ),
         ),
-      db
-        .select({
-          companyId: issueRecoveryActions.companyId,
-          issueId: issueRecoveryActions.sourceIssueId,
-          status: issueRecoveryActions.status,
-        })
-        .from(issueRecoveryActions)
-        .where(inArray(issueRecoveryActions.status, ["active", "escalated"])),
+      issueIdsUnderAnalysis.length === 0
+        ? Promise.resolve([])
+        : db
+          .select({
+            companyId: issueRecoveryActions.companyId,
+            issueId: issueRecoveryActions.sourceIssueId,
+            status: issueRecoveryActions.status,
+          })
+          .from(issueRecoveryActions)
+          .where(
+            and(
+              inArray(issueRecoveryActions.status, ["active", "escalated"]),
+              inArray(issueRecoveryActions.sourceIssueId, issueIdsUnderAnalysis),
+            ),
+          ),
     ]);
 
     const openRecoveryIssues = recoveryIssueRows.flatMap((row) => {

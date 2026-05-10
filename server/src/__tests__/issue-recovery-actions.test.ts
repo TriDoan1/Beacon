@@ -685,6 +685,47 @@ describeEmbeddedPostgres("issue recovery actions", () => {
     });
   });
 
+  it("allows false-positive recovery resolution to restore a blocked source issue in the same request", async () => {
+    const { companyId, managerId, sourceIssueId } = await seedCompany();
+    await db.update(issues).set({ status: "blocked" }).where(eq(issues.id, sourceIssueId));
+    const recoveryActionSvc = issueRecoveryActionService(db);
+    const action = await recoveryActionSvc.upsertSourceScoped({
+      companyId,
+      sourceIssueId,
+      kind: "issue_graph_liveness",
+      ownerType: "agent",
+      ownerAgentId: managerId,
+      cause: "issue_graph_liveness",
+      fingerprint: "graph-liveness:false-positive-unblock",
+      evidence: { latestIssueStatus: "blocked" },
+      nextAction: "Confirm whether the issue is actually stranded.",
+      wakePolicy: { type: "manual" },
+    });
+    const app = createApp();
+
+    const resolved = await request(app)
+      .post(`/api/issues/${sourceIssueId}/recovery-actions/resolve`)
+      .send({
+        actionId: action.id,
+        outcome: "false_positive",
+        sourceIssueStatus: "in_review",
+        resolutionNote: "Recovery signal was stale; return to review.",
+      })
+      .expect(200);
+
+    expect(resolved.body.issue).toMatchObject({
+      id: sourceIssueId,
+      status: "in_review",
+      activeRecoveryAction: null,
+    });
+    expect(resolved.body.recoveryAction).toMatchObject({
+      id: action.id,
+      status: "resolved",
+      outcome: "false_positive",
+      resolutionNote: "Recovery signal was stale; return to review.",
+    });
+  });
+
   it("enforces company scope when resolving recovery actions", async () => {
     const { companyId, managerId, sourceIssueId } = await seedCompany();
     const recoveryActionSvc = issueRecoveryActionService(db);

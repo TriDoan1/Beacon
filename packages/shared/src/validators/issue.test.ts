@@ -3,6 +3,7 @@ import { MAX_ISSUE_REQUEST_DEPTH } from "../index.js";
 import {
   addIssueCommentSchema,
   createIssueSchema,
+  resolveIssueRecoveryActionSchema,
   respondIssueThreadInteractionSchema,
   suggestedTaskDraftSchema,
   updateIssueSchema,
@@ -44,6 +45,25 @@ describe("issue validators", () => {
     });
 
     expect(parsed.comment).toBe("Done\n\n- Verified the route");
+  });
+
+  it("allows false-positive recovery resolutions to atomically restore the source issue status", () => {
+    expect(
+      resolveIssueRecoveryActionSchema.parse({
+        outcome: "false_positive",
+        sourceIssueStatus: "in_review",
+      }),
+    ).toMatchObject({
+      outcome: "false_positive",
+      sourceIssueStatus: "in_review",
+    });
+
+    expect(
+      resolveIssueRecoveryActionSchema.safeParse({
+        outcome: "false_positive",
+        sourceIssueStatus: "blocked",
+      }).success,
+    ).toBe(false);
   });
 
   it("normalizes escaped line breaks in issue comment bodies", () => {
