@@ -591,17 +591,174 @@ git push
 
 ---
 
+## Q. Wire up webhook receivers on Tailwind (recommended)
+
+After every intake the user files, Paperclip can POST a signed webhook to a
+URL you provide. Tailwind already has Resend wired, so this is the path to
+"we got your report" emails without writing a polling loop.
+
+### Q1. Generate a webhook secret and store it on the Concierge config
+
+Pick a high-entropy secret (32+ bytes), e.g.:
+
+```sh
+openssl rand -hex 32
+# 4f8b9cab... (copy this)
+```
+
+Update `support_widget_configs` for `tailwind`:
+
+```sql
+UPDATE support_widget_configs
+SET webhook_url = 'https://tailwind.com/api/support/webhooks',
+    webhook_signing_secret = '<the-32-byte-hex-from-above>'
+WHERE product_key = 'tailwind';
+```
+
+> Until the operator UI form lands, this lives in plaintext. Fine for v1 on
+> the Mac mini; rotate via SQL whenever you want.
+
+### Q2. Add the receiver route to Tailwind
+
+Create `src/app/api/support/webhooks/route.ts`:
+
+```ts
+import { NextRequest, NextResponse } from "next/server";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { Resend } from "resend";
+
+const SECRET = process.env.PAPERCLIP_WEBHOOK_SECRET!;
+const resend = new Resend(process.env.RESEND_API_KEY!);
+
+function verify(secret: string, body: string, header: string, toleranceSec = 300): boolean {
+  const parts = header.split(",");
+  let ts: number | null = null;
+  let v1: string | null = null;
+  for (const p of parts) {
+    const [k, v] = p.split("=");
+    if (k === "t" && v) ts = Number(v);
+    else if (k === "v1" && v) v1 = v;
+  }
+  if (ts === null || !v1) return false;
+  if (Math.abs(Math.floor(Date.now() / 1000) - ts) > toleranceSec) return false;
+  const expected = createHmac("sha256", secret).update(`${ts}.${body}`).digest("hex");
+  if (expected.length !== v1.length) return false;
+  return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(v1, "hex"));
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.text();
+  const sig = req.headers.get("x-paperclip-signature");
+  if (!sig || !verify(SECRET, body, sig)) {
+    return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
+  }
+  const event = JSON.parse(body);
+
+  if (event.type === "intake_submitted" && event.endUser?.email) {
+    await resend.emails.send({
+      from: "Tailwind Support <support@tailwind.com>",
+      to: event.endUser.email,
+      subject: `We got your report (#${event.issueId.slice(0, 8)})`,
+      html: `
+        <p>Thanks — we received your report and an engineer will follow up shortly.</p>
+        <p><strong>What you told us:</strong> ${escape(event.intake.whatHappened)}</p>
+        <p>You can reply to this email and we'll thread it onto your ticket.</p>
+      `,
+    });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+function escape(s: string) {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;",
+  );
+}
+```
+
+### Q3. Set the webhook secret in Vercel
+
+Add `PAPERCLIP_WEBHOOK_SECRET` to the Tailwind project's Vercel env (Production, Preview, Development) — same value you stored in `support_widget_configs.webhook_signing_secret`.
+
+### Q4. Verify
+
+Send a test intake from the widget. On the Mac mini, watch `pnpm dev`'s output:
+
+- `support: webhook delivered` (with status 200) → Tailwind got it, your `route.ts` is wired correctly.
+- `support: webhook delivery failed` with `errorCode: http_401` → signature mismatch — confirm the secret in Vercel matches the one in `support_widget_configs`.
+- `errorCode: http_404` or `timeout` → the URL is wrong or Vercel isn't responding.
+
+After a successful delivery, the user's email inbox should have the "we got your report" email within a few seconds.
+
+### Webhook event shapes
+
+Two event types fire today:
+
+**`intake_submitted`** — fires when the model calls `submit_intake_packet`:
+
+```ts
+{
+  id: "evt_<uuid>",
+  type: "intake_submitted",
+  occurredAt: "2026-05-09T20:14:00.000Z",
+  productKey: "tailwind",
+  sessionId: "sess_<uuid>",
+  issueId: "iss_<uuid>",        // newly created issues row
+  intakePacketId: "pkt_<uuid>",
+  endUser: { externalId, email, name },
+  intake: {
+    whatUserWasDoing,
+    whatHappened,
+    reproSteps: [...],
+    affectedFeature,
+    severityHint
+  },
+  context: { url, routePath, userAgent }
+}
+```
+
+**`session_closed`** — fires for *every* close (intake, request_human, not_a_bug, cost_cap, abandoned):
+
+```ts
+{
+  id: "evt_<uuid>",
+  type: "session_closed",
+  occurredAt: "...",
+  productKey: "tailwind",
+  sessionId: "sess_<uuid>",
+  closeReason: "intake_submitted" | "human_requested" | "not_a_bug" | "cost_cap" | "abandoned",
+  modelUsed: "claude-haiku-4-5-20251001",
+  spendUsdCents: 23,
+  turnCount: 4,
+  endUser: { externalId, email, name },
+  issueId?: "iss_<uuid>"        // only when closeReason === "intake_submitted"
+}
+```
+
+Receivers should switch on `event.type` and ignore anything they don't recognize — new event types may be added in future versions.
+
+### Delivery semantics (read this once)
+
+- **At-most-once delivery in Phase 1B.** No retry queue, no dead-letter table. Failed deliveries are logged to Paperclip's pino output. If your endpoint goes down, you miss those events. Resilience comes in a follow-up alongside `support_webhook_deliveries` persistence.
+- **Best-effort ordering.** `intake_submitted` and `session_closed` for the same intake are dispatched back-to-back from the same handler, but they're separate HTTP calls — your receiver must tolerate either order. Use `event.id` for idempotency.
+- **5-second per-attempt timeout.** Don't do heavy work synchronously in the receiver. Acknowledge with 200 OK quickly, then push work to a queue.
+- **Signature replay window: 5 minutes.** Receivers should reject signatures older than this — the example code above already enforces it via `toleranceSec`.
+
+---
+
 ## What's NOT in this deployment (and when to plan for them)
 
-These are tracked as Phase 1B / Phase 2 and don't block the loop above, but you'll want them within the first 100 real users:
+These are tracked as Phase 2+ and don't block the loop above:
 
 1. **Last-Event-ID mid-stream resume** — currently, a connection drop mid-assistant-token loses the partial response on the client side. Reload-resume works fine; live mid-stream doesn't.
-2. **Issue auto-creation from intake packets** — packets sit on their own table; you currently have to triage them manually. The PR after Phase 1A will create an `issues` row so existing Paperclip employees can pick up triage.
-3. **Outbound webhooks** for `intake_submitted` and `session_closed` so Tailwind can email users via Resend ("we got your report, ticket #ABC"). Right now users only see the in-widget acknowledgement.
-4. **Operator UI for Concierge config** — model picker, prompt editor, origin allowlist editing, secret rotation. Without this you're updating `agents.adapter_config` and `support_widget_configs` via SQL.
-5. **Test Concierge sandbox** — chat with your own Concierge as an operator before pushing prompt changes to live.
-6. **Resend inbound-email + Twilio inbound-SMS handlers** — the routes exist as 501 stubs. Wire them up to make support work via email and SMS using the same Concierge employee.
-7. **Move Paperclip off the Mac mini** to Fly.io / Railway / a small VPS once you're past the private-beta phase. The Mac mini's reliability ceiling is the same as your home internet's.
+2. **Operator UI for Concierge config** — model picker, prompt editor, origin allowlist editing, secret rotation. Without this you're updating `agents.adapter_config` and `support_widget_configs` via SQL.
+3. **Test Concierge sandbox** — chat with your own Concierge as an operator before pushing prompt changes to live.
+4. **Resend inbound-email + Twilio inbound-SMS handlers** — the routes exist as 501 stubs. Wire them up to make support work via email and SMS using the same Concierge employee.
+5. **Persistent webhook delivery log + retries** — `support_webhook_deliveries` table, exponential backoff, replay endpoint. Today: fire-and-forget, log-only.
+6. **Move Paperclip off the Mac mini** to Fly.io / Railway / a small VPS once you're past the private-beta phase. The Mac mini's reliability ceiling is the same as your home internet's.
+
+**Now in this deployment** (added in Phase 1B): Submitting `submit_intake_packet` automatically creates an `issues` row with `originKind = 'support_intake'`, links it back to both `support_sessions.linked_issue_id` and `support_intake_packets.linked_issue_id`, and maps the model's `severityHint` to `issues.priority` (`blocker → urgent`, `major → high`, `minor → medium`, `cosmetic → low`). The issue title is `[ProductLabel] <truncated whatHappened>`; the description is markdown with reporter, URL, user agent, and the full structured intake. Triage employees can pick this up via the existing operator UI / API.
 
 ---
 

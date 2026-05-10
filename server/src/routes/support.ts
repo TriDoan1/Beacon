@@ -1,9 +1,11 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import multer from "multer";
 import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { assets, supportWidgetConfigs } from "@paperclipai/db";
 import type { StorageService } from "../storage/types.js";
+import { fireWebhook, type SupportWebhookEvent } from "../services/support-webhooks.js";
 import {
   SUPPORT_DEFAULT_GREETING,
   SUPPORT_DEFAULT_MAX_TURNS_PER_SESSION,
@@ -386,9 +388,70 @@ export function supportRoutes(db: Db, storage?: StorageService): Router {
       const effectsResult = await applyToolEffects(db, {
         sessionId,
         companyId: ctx.companyId,
+        productKey: ctx.productKey,
+        productLabel: ctx.productLabel,
+        endUserEmail: auth.email ?? null,
         effects: toolEffectsCollected,
         initialContext: session.initialContext,
       });
+
+      // Fire webhooks AFTER persistence so receivers see consistent state
+      // even if delivery fails. Delivery is fire-and-forget; failures are
+      // logged but never block the SSE response.
+      if (ctx.webhookUrl && ctx.webhookSigningSecret) {
+        const occurredAt = new Date().toISOString();
+        if (effectsResult.intake && effectsResult.intakeIssueId && effectsResult.intakePacketId) {
+          const event: SupportWebhookEvent = {
+            id: randomUUID(),
+            type: "intake_submitted",
+            occurredAt,
+            productKey: ctx.productKey,
+            sessionId,
+            issueId: effectsResult.intakeIssueId,
+            intakePacketId: effectsResult.intakePacketId,
+            endUser: {
+              externalId: auth.externalId,
+              email: auth.email ?? null,
+              name: auth.name ?? null,
+            },
+            intake: {
+              whatUserWasDoing: effectsResult.intake.whatUserWasDoing,
+              whatHappened: effectsResult.intake.whatHappened,
+              reproSteps: effectsResult.intake.reproSteps,
+              affectedFeature: effectsResult.intake.affectedFeature ?? null,
+              severityHint: effectsResult.intake.severityHint ?? null,
+            },
+            context: {
+              url: session.initialContext.url ?? null,
+              routePath: session.initialContext.routePath ?? null,
+              userAgent: session.initialContext.userAgent ?? null,
+            },
+          };
+          fireWebhook({ url: ctx.webhookUrl, secret: ctx.webhookSigningSecret, event });
+        }
+        if (effectsResult.closeReason) {
+          // Re-read totals so the webhook sees post-update spend/turn count.
+          const refreshed = await loadSession(db, sessionId);
+          const event: SupportWebhookEvent = {
+            id: randomUUID(),
+            type: "session_closed",
+            occurredAt,
+            productKey: ctx.productKey,
+            sessionId,
+            closeReason: effectsResult.closeReason,
+            modelUsed: session.modelUsed,
+            spendUsdCents: refreshed?.spendUsdCents ?? session.spendUsdCents,
+            turnCount: refreshed?.turnCount ?? session.turnCount,
+            endUser: {
+              externalId: auth.externalId,
+              email: auth.email ?? null,
+              name: auth.name ?? null,
+            },
+            ...(effectsResult.intakeIssueId ? { issueId: effectsResult.intakeIssueId } : {}),
+          };
+          fireWebhook({ url: ctx.webhookUrl, secret: ctx.webhookSigningSecret, event });
+        }
+      }
 
       writeEvent(
         "complete",
@@ -396,6 +459,7 @@ export function supportRoutes(db: Db, storage?: StorageService): Router {
           assistantMessageSeq: assistantSeq.seq,
           status: effectsResult.closeReason ? "closed" : "active",
           closeReason: effectsResult.closeReason,
+          issueId: effectsResult.intakeIssueId ?? null,
         },
         assistantSeq.seq,
       );

@@ -2,6 +2,7 @@ import { and, eq, max as sqlMax, sql, gte, count } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import {
   agents,
+  issues,
   supportEndUsers,
   supportIntakePackets,
   supportMessages,
@@ -327,48 +328,153 @@ export async function closeSession(
     .where(eq(supportSessions.id, input.sessionId));
 }
 
+export interface ApplyToolEffectsResult {
+  closeReason: SupportSessionCloseReason | null;
+  /** Set when an intake packet was submitted; identifies the new issue + packet for webhook callers. */
+  intakeIssueId?: string;
+  intakePacketId?: string;
+  intake?: ConciergeToolEffect & { kind: "submit_intake" };
+  humanRequest?: ConciergeToolEffect & { kind: "request_human" };
+  notABug?: ConciergeToolEffect & { kind: "not_a_bug" };
+}
+
 export async function applyToolEffects(
   db: Db,
   input: {
     sessionId: string;
     companyId: string;
+    productKey: string;
+    productLabel: string;
+    endUserEmail: string | null;
     effects: ConciergeToolEffect[];
     initialContext: SupportSessionInitialContext;
   },
-): Promise<{ closeReason: SupportSessionCloseReason | null }> {
+): Promise<ApplyToolEffectsResult> {
   let closeReason: SupportSessionCloseReason | null = null;
+  let intakeIssueId: string | undefined;
+  let intakePacketId: string | undefined;
+  const result: ApplyToolEffectsResult = { closeReason: null };
+
   for (const effect of input.effects) {
     if (effect.kind === "submit_intake") {
-      await db.insert(supportIntakePackets).values({
-        companyId: input.companyId,
-        sessionId: input.sessionId,
-        whatUserWasDoing: effect.whatUserWasDoing,
-        whatHappened: effect.whatHappened,
-        reproSteps: effect.reproSteps,
-        affectedFeature: effect.affectedFeature ?? null,
-        browserInfo: {
-          userAgent: input.initialContext.userAgent,
-          viewport: input.initialContext.viewport,
-          url: input.initialContext.url,
-          routePath: input.initialContext.routePath,
-          timeZone: input.initialContext.timeZone,
-          language: input.initialContext.locale,
-        },
-        consoleErrors: input.initialContext.consoleErrors ?? [],
-        networkErrors: input.initialContext.networkErrors ?? [],
-        metadata: effect.severityHint ? { severityHint: effect.severityHint } : {},
-      });
+      const issueTitle = buildIssueTitle(input.productLabel, effect);
+      const issueDescription = buildIssueDescription(effect, input);
+      const insertedIssue = await db
+        .insert(issues)
+        .values({
+          companyId: input.companyId,
+          title: issueTitle,
+          description: issueDescription,
+          status: "backlog",
+          priority: mapSeverityToPriority(effect.severityHint),
+          originKind: "support_intake",
+          originId: input.sessionId,
+        })
+        .returning({ id: issues.id });
+      intakeIssueId = insertedIssue[0]!.id;
+
+      const insertedPacket = await db
+        .insert(supportIntakePackets)
+        .values({
+          companyId: input.companyId,
+          sessionId: input.sessionId,
+          whatUserWasDoing: effect.whatUserWasDoing,
+          whatHappened: effect.whatHappened,
+          reproSteps: effect.reproSteps,
+          affectedFeature: effect.affectedFeature ?? null,
+          browserInfo: {
+            userAgent: input.initialContext.userAgent,
+            viewport: input.initialContext.viewport,
+            url: input.initialContext.url,
+            routePath: input.initialContext.routePath,
+            timeZone: input.initialContext.timeZone,
+            language: input.initialContext.locale,
+          },
+          consoleErrors: input.initialContext.consoleErrors ?? [],
+          networkErrors: input.initialContext.networkErrors ?? [],
+          linkedIssueId: intakeIssueId,
+          metadata: effect.severityHint ? { severityHint: effect.severityHint } : {},
+        })
+        .returning({ id: supportIntakePackets.id });
+      intakePacketId = insertedPacket[0]!.id;
+
+      await db
+        .update(supportSessions)
+        .set({ linkedIssueId: intakeIssueId, updatedAt: new Date() })
+        .where(eq(supportSessions.id, input.sessionId));
+
       closeReason = "intake_submitted";
+      result.intake = effect;
     } else if (effect.kind === "request_human") {
       closeReason = "human_requested";
+      result.humanRequest = effect;
     } else if (effect.kind === "not_a_bug") {
       closeReason = "not_a_bug";
+      result.notABug = effect;
     }
   }
   if (closeReason) {
     await closeSession(db, { sessionId: input.sessionId, reason: closeReason });
   }
-  return { closeReason };
+
+  result.closeReason = closeReason;
+  result.intakeIssueId = intakeIssueId;
+  result.intakePacketId = intakePacketId;
+  return result;
+}
+
+function buildIssueTitle(
+  productLabel: string,
+  effect: ConciergeToolEffect & { kind: "submit_intake" },
+): string {
+  const trimmedHappened = effect.whatHappened.trim().replace(/\s+/g, " ");
+  const summary = trimmedHappened.length > 80 ? trimmedHappened.slice(0, 77).trimEnd() + "…" : trimmedHappened;
+  return `[${productLabel}] ${summary || "User-reported issue"}`;
+}
+
+function buildIssueDescription(
+  effect: ConciergeToolEffect & { kind: "submit_intake" },
+  ctx: { sessionId: string; endUserEmail: string | null; productKey: string; initialContext: SupportSessionInitialContext },
+): string {
+  const lines: string[] = [];
+  lines.push("**Reported via Support Concierge intake.**");
+  lines.push("");
+  lines.push(`- Product: \`${ctx.productKey}\``);
+  if (ctx.endUserEmail) lines.push(`- Reporter: ${ctx.endUserEmail}`);
+  if (ctx.initialContext.url) lines.push(`- URL: ${ctx.initialContext.url}`);
+  if (ctx.initialContext.userAgent) lines.push(`- User agent: ${ctx.initialContext.userAgent}`);
+  if (effect.affectedFeature) lines.push(`- Affected feature: ${effect.affectedFeature}`);
+  if (effect.severityHint) lines.push(`- Severity hint (concierge): ${effect.severityHint}`);
+  lines.push(`- Session: \`${ctx.sessionId}\``);
+  lines.push("");
+  lines.push("### What the user was doing");
+  lines.push(effect.whatUserWasDoing.trim());
+  lines.push("");
+  lines.push("### What happened instead");
+  lines.push(effect.whatHappened.trim());
+  if (effect.reproSteps.length > 0) {
+    lines.push("");
+    lines.push("### Steps to reproduce");
+    effect.reproSteps.forEach((step, i) => {
+      lines.push(`${i + 1}. ${step}`);
+    });
+  }
+  return lines.join("\n");
+}
+
+function mapSeverityToPriority(severity: string | undefined): string {
+  switch (severity) {
+    case "blocker":
+      return "urgent";
+    case "major":
+      return "high";
+    case "minor":
+      return "medium";
+    case "cosmetic":
+      return "low";
+    default:
+      return "medium";
+  }
 }
 
 export async function todayUserDailySpendCents(
