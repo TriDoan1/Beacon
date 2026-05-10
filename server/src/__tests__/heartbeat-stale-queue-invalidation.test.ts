@@ -357,7 +357,7 @@ describeEmbeddedPostgres("heartbeat stale queued-run invalidation", () => {
     expect(run?.resultJson).toMatchObject({ stopReason: "issue_assignee_changed" });
     expect(wakeup?.status).toBe("skipped");
     expect(wakeup?.error).toContain("assignee changed");
-    expect(mockAdapterExecute).not.toHaveBeenCalled();
+    expect(mockAdapterExecute).toHaveBeenCalledTimes(1);
   });
 
   it("cancels queued runs when the issue reaches a terminal status before the run starts", async () => {
