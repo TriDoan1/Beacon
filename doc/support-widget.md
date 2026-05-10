@@ -260,16 +260,127 @@ widget package PR.
 
 ---
 
-## 7. What's still missing (tracked in follow-ups)
+## 7. Embedding `@paperclipai/support-widget` (recommended)
 
-- npm widget package with Shadow DOM mount, `Last-Event-ID` reconnect, and
-  `html2canvas` screenshot capture.
-- Operator UI: Concierge config form (model picker, prompt editor, origin
-  allowlist, secret rotation, budget caps) and a "Test Concierge" sandbox.
-- Outbound webhooks fired on `intake_submitted` and `session_closed`.
-- Resend inbound-email + Twilio inbound-SMS handlers (the route stubs return
-  501 today).
-- Auto-creation of an `issues` row from a submitted intake packet, so existing
-  Paperclip employees can pick up triage/diagnosis work.
-- 20-scenario eval harness for prompt iteration.
-- Upstash Redis-backed rate limiting (currently in-memory).
+The `packages/support-widget/` workspace package replaces the manual fetch +
+SSE parsing from §4 with a single mount call. While we're not on npm yet,
+Tailwind can consume it via `file:` link or `npm pack` tarball.
+
+### 7.1 Install
+
+From the Paperclip repo:
+
+```sh
+pnpm --filter @paperclipai/support-widget build
+```
+
+Then in Tailwind's `package.json`, point at the built package:
+
+```json
+{
+  "dependencies": {
+    "@paperclipai/support-widget": "file:../Paperclip/packages/support-widget"
+  }
+}
+```
+
+### 7.2 Mount
+
+```tsx
+// src/components/SupportWidget.tsx
+"use client";
+import { useEffect } from "react";
+import { mountSupportWidget } from "@paperclipai/support-widget";
+import html2canvas from "html2canvas";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+);
+
+export function SupportWidget() {
+  useEffect(() => {
+    let handle: { destroy: () => void } | null = null;
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) return;
+      handle = mountSupportWidget({
+        apiUrl: process.env.NEXT_PUBLIC_PAPERCLIP_API_URL!,
+        productKey: "tailwind",
+        getAccessToken: async () => {
+          const { data } = await supabase.auth.getSession();
+          return data.session?.access_token ?? "";
+        },
+        container: document.body,
+        onCapture: async () => {
+          const canvas = await html2canvas(document.body);
+          return await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("blob_failed"))));
+          });
+        },
+      });
+    })();
+    return () => handle?.destroy();
+  }, []);
+  return null;
+}
+```
+
+Mount it once in your authenticated layout. The launcher floats over every
+page; click opens the panel; the conversation persists across reloads via
+`localStorage` (only the session id — transcript always re-fetches from
+`/replay`).
+
+### 7.3 Theming
+
+The widget fetches `/api/support/products/:productKey/theme` on mount and
+applies any returned `primaryColor`, `accentColor`, `fontFamily` as CSS custom
+properties on the host element. Theme passed via the `theme` prop overrides
+the API response field-by-field. Other tokens (`--sw-bg`, `--sw-text`,
+`--sw-radius`, etc.) can be overridden by setting CSS custom properties on the
+mount container before calling `mountSupportWidget`.
+
+### 7.4 Programmatic control
+
+```ts
+const handle = mountSupportWidget({ /* ... */, showLauncher: false });
+handle.open();             // open the panel
+handle.close();            // close (session stays active)
+handle.getState();         // { phase, sessionId, closeReason, errorCode }
+handle.destroy();          // tear down completely
+```
+
+Pass `onStateChange` to receive state transitions (useful for analytics).
+
+### 7.5 What ships in this PR
+
+- Shadow DOM mount with full CSS isolation
+- Floating launcher button + chat panel (mobile sheet at <640px)
+- Streaming assistant responses with per-turn tool-call indicators
+- Friendly status banners for closed/error/offline states
+- localStorage session resume across reloads
+- Theme fetched from API + prop overrides
+- Screenshot upload via `onCapture` hook (host implements capture, widget
+  uploads to `/api/support/sessions/:id/assets`)
+- 18 unit tests covering SSE parsing, session manager error mapping, and
+  storage scoping per `productKey`
+
+### 7.6 What's still missing (tracked in follow-ups)
+
+- **`Last-Event-ID` mid-stream resume.** Phase 1 reconnects only between
+  completed turns. A dropped connection mid-assistant-response loses that
+  partial response on the client side.
+- **Issue auto-creation** from `submit_intake_packet` so existing Paperclip
+  employees can pick up triage.
+- **Outbound webhooks** (`intake_submitted`, `session_closed`) so Tailwind
+  can email users via Resend without polling.
+- **Resend inbound-email + Twilio inbound-SMS handlers** to make the 501
+  stubs real.
+- **Operator UI**: Concierge config form (model picker, prompt editor,
+  origin allowlist, secret rotation, budget caps) and a "Test Concierge"
+  sandbox.
+- **20-scenario eval harness** for prompt iteration.
+- **Upstash Redis-backed rate limiting** (currently in-memory).
+- **Playwright E2E**: launch → message → tool call → close paths against a
+  fake host page.

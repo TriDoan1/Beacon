@@ -294,7 +294,7 @@ export async function createApp(
       allowedHostnames: opts.allowedHostnames,
     }),
   );
-  app.use(supportRoutes(db));
+  app.use(supportRoutes(db, opts.storageService));
   app.use("/api", api);
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "API route not found" });

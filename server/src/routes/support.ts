@@ -1,5 +1,9 @@
 import { Router, type Request, type Response } from "express";
+import multer from "multer";
+import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
+import { assets, supportWidgetConfigs } from "@paperclipai/db";
+import type { StorageService } from "../storage/types.js";
 import {
   SUPPORT_DEFAULT_GREETING,
   SUPPORT_DEFAULT_MAX_TURNS_PER_SESSION,
@@ -102,14 +106,41 @@ function sendError(res: Response, err: unknown) {
   res.status(500).json({ error: "internal_error" });
 }
 
-function getTheme(ctx: SupportProductContext): SupportWidgetTheme {
-  // Theme is stored on widget config; fetched separately via /theme.
-  // For session-open response we just echo a minimal default.
-  return {};
+async function loadTheme(db: Db, productKey: string): Promise<SupportWidgetTheme> {
+  const rows = await db
+    .select({ theme: supportWidgetConfigs.theme })
+    .from(supportWidgetConfigs)
+    .where(eq(supportWidgetConfigs.productKey, productKey))
+    .limit(1);
+  return (rows[0]?.theme ?? {}) as SupportWidgetTheme;
 }
 
-export function supportRoutes(db: Db): Router {
+const SUPPORT_ASSET_MAX_BYTES = 10 * 1024 * 1024;
+const SUPPORT_ASSET_ALLOWED_CONTENT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+]);
+
+export function supportRoutes(db: Db, storage?: StorageService): Router {
   const router = Router();
+  const assetUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: SUPPORT_ASSET_MAX_BYTES, files: 1 },
+  });
+
+  function runFileUpload(req: Request, res: Response): Promise<void> {
+    return new Promise((resolve, reject) => {
+      assetUpload.single("file")(req, res, (err: unknown) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
 
   // GET /api/support/products/:productKey/theme
   router.get("/api/support/products/:productKey/theme", async (req, res) => {
@@ -126,10 +157,11 @@ export function supportRoutes(db: Db): Router {
       }
       if (origin) res.header("Access-Control-Allow-Origin", origin);
       res.header("Access-Control-Allow-Headers", "authorization,content-type,last-event-id");
+      const theme = await loadTheme(db, ctx.productKey);
       res.json({
         productKey: ctx.productKey,
         productLabel: ctx.productLabel,
-        theme: {},
+        theme,
         enabled: ctx.enabled,
       });
     } catch (err) {
@@ -195,7 +227,7 @@ export function supportRoutes(db: Db): Router {
         sessionId: session.id,
         modelUsed: session.modelUsed,
         greeting: ctx.greeting ?? SUPPORT_DEFAULT_GREETING,
-        theme: getTheme(ctx),
+        theme: await loadTheme(db, ctx.productKey),
         status: "active",
       };
       res.status(201).json(payload);
@@ -413,6 +445,84 @@ export function supportRoutes(db: Db): Router {
         })),
       };
       res.json(payload);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  // POST /api/support/sessions/:sessionId/assets — multipart upload
+  // Used by the widget to attach screenshots and arbitrary attachments to an
+  // active support session. The asset id returned here is referenced by the
+  // model when it calls submit_intake_packet.
+  router.post("/api/support/sessions/:sessionId/assets", async (req, res) => {
+    const sessionId = req.params.sessionId ?? "";
+    try {
+      if (!storage) throw new HttpError(503, "storage_not_configured");
+      const session = await loadSession(db, sessionId);
+      if (!session) throw new HttpError(404, "session_not_found");
+      if (session.status !== "active") throw new HttpError(409, "session_closed");
+      const ctx = await loadSupportProductContext(db, session.productKey);
+      if (!ctx) throw new HttpError(404, "product_not_found");
+      const origin = req.header("origin");
+      if (origin && !originAllowed(ctx, origin)) throw new HttpError(403, "origin_not_allowed");
+
+      const auth = await authenticateEndUser(ctx, req.header("authorization"));
+      const endUser = await upsertSupportEndUser(db, {
+        companyId: ctx.companyId,
+        productKey: ctx.productKey,
+        externalId: auth.externalId,
+        email: auth.email,
+        name: auth.name,
+      });
+      if (endUser.id !== session.endUserId) throw new HttpError(403, "session_user_mismatch");
+
+      try {
+        await runFileUpload(req, res);
+      } catch (err) {
+        if (err instanceof multer.MulterError) {
+          if (err.code === "LIMIT_FILE_SIZE") {
+            throw new HttpError(422, "file_too_large");
+          }
+          throw new HttpError(400, err.code);
+        }
+        throw err;
+      }
+
+      const file = (req as Request & { file?: { mimetype: string; buffer: Buffer; originalname: string } }).file;
+      if (!file) throw new HttpError(400, "missing_file");
+      const contentType = (file.mimetype || "").toLowerCase();
+      if (!SUPPORT_ASSET_ALLOWED_CONTENT_TYPES.has(contentType)) {
+        throw new HttpError(422, "unsupported_content_type");
+      }
+      if (file.buffer.length === 0) throw new HttpError(422, "empty_file");
+
+      const stored = await storage.putFile({
+        companyId: ctx.companyId,
+        namespace: `support/sessions/${sessionId}`,
+        originalFilename: file.originalname || null,
+        contentType,
+        body: file.buffer,
+      });
+      const inserted = await db
+        .insert(assets)
+        .values({
+          companyId: ctx.companyId,
+          provider: stored.provider,
+          objectKey: stored.objectKey,
+          contentType: stored.contentType,
+          byteSize: stored.byteSize,
+          sha256: stored.sha256,
+          originalFilename: stored.originalFilename,
+        })
+        .returning({ id: assets.id });
+
+      if (origin) res.header("Access-Control-Allow-Origin", origin);
+      res.status(201).json({
+        assetId: inserted[0]!.id,
+        contentType: stored.contentType,
+        byteSize: stored.byteSize,
+        contentPath: `/api/assets/${inserted[0]!.id}/content`,
+      });
     } catch (err) {
       sendError(res, err);
     }
