@@ -9,18 +9,12 @@ import { Link } from "@/lib/router";
 import { createIssueDetailPath } from "../lib/issueDetailBreadcrumb";
 import { IssueLinkQuicklook } from "./IssueLinkQuicklook";
 import { isAssignedBacklogBlocker } from "../lib/issue-blockers";
+import {
+  deriveActiveRecoveryDisplayState,
+  type ActiveRecoveryDisplayState,
+} from "../lib/recovery-display";
 
-type BlockerRecoveryState = "needed" | "in_progress" | "observe_only" | "escalated";
-
-function blockerRecoveryStateFor(action: IssueRecoveryAction): BlockerRecoveryState | null {
-  if (action.status === "resolved" || action.status === "cancelled") return null;
-  if (action.status === "escalated") return "escalated";
-  if (action.kind === "active_run_watchdog") return "observe_only";
-  if (action.outcome === "delegated") return "in_progress";
-  return "needed";
-}
-
-const BLOCKER_RECOVERY_TONE: Record<BlockerRecoveryState, { icon: typeof TriangleAlert; label: string; className: string }> = {
+const BLOCKER_RECOVERY_TONE: Record<ActiveRecoveryDisplayState, { icon: typeof TriangleAlert; label: string; className: string }> = {
   needed: {
     icon: TriangleAlert,
     label: "Recovery needed",
@@ -44,7 +38,7 @@ const BLOCKER_RECOVERY_TONE: Record<BlockerRecoveryState, { icon: typeof Triangl
 };
 
 function BlockerRecoveryIndicator({ action }: { action: IssueRecoveryAction }) {
-  const state = blockerRecoveryStateFor(action);
+  const state = deriveActiveRecoveryDisplayState(action);
   if (!state) return null;
   const tone = BLOCKER_RECOVERY_TONE[state];
   const Icon = tone.icon;

@@ -66,6 +66,25 @@ describe("issue validators", () => {
     ).toBe(false);
   });
 
+  it("allows cancelled recovery resolutions to atomically restore the source issue status", () => {
+    expect(
+      resolveIssueRecoveryActionSchema.parse({
+        outcome: "cancelled",
+        sourceIssueStatus: "in_review",
+      }),
+    ).toMatchObject({
+      outcome: "cancelled",
+      sourceIssueStatus: "in_review",
+    });
+
+    expect(
+      resolveIssueRecoveryActionSchema.safeParse({
+        outcome: "cancelled",
+        sourceIssueStatus: "blocked",
+      }).success,
+    ).toBe(false);
+  });
+
   it("normalizes escaped line breaks in issue comment bodies", () => {
     const parsed = addIssueCommentSchema.parse({
       body: "Progress update\\r\\n\\r\\nNext action.",

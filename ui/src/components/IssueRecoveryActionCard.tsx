@@ -16,18 +16,19 @@ import {
 } from "@/components/ui/popover";
 import { agentUrl } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import {
+  deriveRecoveryDisplayState,
+  type RecoveryDisplayState,
+} from "@/lib/recovery-display";
 
-export type RecoveryCardCardState =
-  | "needed"
-  | "in_progress"
-  | "observe_only"
-  | "escalated"
-  | "resolved";
+export type RecoveryCardCardState = RecoveryDisplayState;
+export const deriveRecoveryCardState = deriveRecoveryDisplayState;
 
 export type RecoveryResolveOutcome =
   | "done"
   | "in_review"
-  | "false_positive";
+  | "false_positive_done"
+  | "false_positive_in_review";
 
 export interface IssueRecoveryActionCardProps {
   action: IssueRecoveryAction;
@@ -118,17 +119,6 @@ const STATE_TONE: Record<RecoveryCardCardState, {
     divider: "border-emerald-300/60 dark:border-emerald-500/30",
   },
 };
-
-export function deriveRecoveryCardState(
-  action: Pick<IssueRecoveryAction, "status" | "kind" | "outcome">,
-): RecoveryCardCardState {
-  if (action.status === "resolved") return "resolved";
-  if (action.status === "escalated") return "escalated";
-  if (action.status === "cancelled") return "resolved";
-  if (action.kind === "active_run_watchdog") return "observe_only";
-  if (action.outcome === "delegated") return "in_progress";
-  return "needed";
-}
 
 const OUTCOME_LABEL: Record<IssueRecoveryActionOutcome, string> = {
   restored: "restored",
@@ -313,9 +303,16 @@ const RESOLVE_OPTIONS: Array<{
     description: "Hand off to a reviewer with a real review path.",
   },
   {
-    outcome: "false_positive",
-    label: "Mark false positive",
-    description: "Cancel recovery — only the board may do this.",
+    outcome: "false_positive_done",
+    label: "False positive, done",
+    description: "Dismiss recovery and mark the source issue complete.",
+    destructive: true,
+    boardOnly: true,
+  },
+  {
+    outcome: "false_positive_in_review",
+    label: "False positive, review",
+    description: "Dismiss recovery and send the source issue for review.",
     destructive: true,
     boardOnly: true,
   },

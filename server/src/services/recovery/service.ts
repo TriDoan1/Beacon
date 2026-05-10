@@ -1630,7 +1630,7 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
           reason: "no_invokable_recovery_owner",
         },
       monitorPolicy: null,
-      maxAttempts: 1,
+      maxAttempts: null,
       lastAttemptAt: now,
     });
 
@@ -1858,6 +1858,8 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
             eq(issueComments.authorType, "system"),
           ),
         )
+        .orderBy(desc(issueComments.createdAt))
+        .limit(50)
         .then((rows) => rows.some((row) => (row.body ?? "").includes(escalationCommentMarker)));
 
       if (!hasEscalationComment) {
@@ -1913,12 +1915,26 @@ export function recoveryService(db: Db, deps: { enqueueWakeup: RecoveryWakeup })
     });
 
     if (recoveryAction.ownerAgentId === input.issue.assigneeAgentId) {
-      const reblocked = await issuesSvc.update(input.issue.id, {
-        status: "blocked",
-        blockedByIssueIds: blockerIds,
-        assigneeAgentId: recoveryAction.ownerAgentId ?? input.issue.assigneeAgentId,
-      });
-      if (!reblocked) return null;
+      const [currentIssue] = await db
+        .select({
+          status: issues.status,
+          assigneeAgentId: issues.assigneeAgentId,
+        })
+        .from(issues)
+        .where(eq(issues.id, input.issue.id))
+        .limit(1);
+      if (
+        currentIssue &&
+        (currentIssue.status !== "blocked" ||
+          currentIssue.assigneeAgentId !== (recoveryAction.ownerAgentId ?? input.issue.assigneeAgentId))
+      ) {
+        const reblocked = await issuesSvc.update(input.issue.id, {
+          status: "blocked",
+          blockedByIssueIds: blockerIds,
+          assigneeAgentId: recoveryAction.ownerAgentId ?? input.issue.assigneeAgentId,
+        });
+        if (!reblocked) return null;
+      }
     }
 
     return updated;

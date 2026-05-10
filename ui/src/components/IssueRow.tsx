@@ -8,6 +8,7 @@ import {
   withIssueDetailHeaderSeed,
 } from "../lib/issueDetailBreadcrumb";
 import { cn } from "../lib/utils";
+import { deriveActiveRecoveryDisplayState } from "../lib/recovery-display";
 import { StatusIcon } from "./StatusIcon";
 import { productivityReviewTriggerLabel } from "./ProductivityReviewBadge";
 import { hasAssignedBacklogBlocker } from "../lib/issue-blockers";
@@ -263,16 +264,8 @@ const RECOVERY_CHIP_TONE: Record<
   },
 };
 
-function rowRecoveryStateFor(action: IssueRecoveryAction): keyof typeof RECOVERY_CHIP_TONE | null {
-  if (action.status === "resolved" || action.status === "cancelled") return null;
-  if (action.status === "escalated") return "escalated";
-  if (action.kind === "active_run_watchdog") return "observe_only";
-  if (action.outcome === "delegated") return "in_progress";
-  return "needed";
-}
-
 function renderRecoveryChip(action: IssueRecoveryAction, selected: boolean): ReactNode {
-  const state = rowRecoveryStateFor(action);
+  const state = deriveActiveRecoveryDisplayState(action);
   if (!state) return null;
   const tone = RECOVERY_CHIP_TONE[state];
   const Icon = tone.icon;

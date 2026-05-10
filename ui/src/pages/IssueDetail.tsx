@@ -2965,7 +2965,10 @@ export function IssueDetail() {
         case "in_review":
           void resolveRecoveryAction.mutateAsync({ actionId, outcome: "restored", sourceIssueStatus: "in_review" });
           return;
-        case "false_positive":
+        case "false_positive_done":
+          void resolveRecoveryAction.mutateAsync({ actionId, outcome: "false_positive", sourceIssueStatus: "done" });
+          return;
+        case "false_positive_in_review":
           void resolveRecoveryAction.mutateAsync({ actionId, outcome: "false_positive", sourceIssueStatus: "in_review" });
           return;
       }

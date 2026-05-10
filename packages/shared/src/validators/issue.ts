@@ -239,7 +239,7 @@ export const resolveIssueRecoveryActionSchema = z.object({
     return;
   }
 
-  if (value.outcome === "false_positive") {
+  if (value.outcome === "false_positive" || value.outcome === "cancelled") {
     if (
       value.sourceIssueStatus !== undefined &&
       value.sourceIssueStatus !== null &&
@@ -248,7 +248,7 @@ export const resolveIssueRecoveryActionSchema = z.object({
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "False-positive recovery actions may only move the source issue to done or in_review",
+        message: "This recovery outcome may only move the source issue to done or in_review",
         path: ["sourceIssueStatus"],
       });
     }

@@ -188,16 +188,17 @@ describe("IssueRecoveryActionCard", () => {
 
     expect(document.body.textContent).toContain("Mark issue done");
     expect(document.body.textContent).toContain("Send for review");
-    expect(document.body.textContent).toContain("Mark false positive");
+    expect(document.body.textContent).toContain("False positive, done");
+    expect(document.body.textContent).toContain("False positive, review");
     expect(document.body.textContent).not.toContain("Mark blocked");
   });
 
-  it("hides false_positive option unless canCancelRecovery is set", () => {
+  it("hides false-positive options unless canCancelRecovery is set", () => {
     const first = render(
       <IssueRecoveryActionCard action={buildAction()} onResolve={() => {}} />,
     );
     click(first.querySelector("[data-testid='recovery-action-resolve-trigger']"));
-    expect(document.body.textContent).not.toContain("Mark false positive");
+    expect(document.body.textContent).not.toContain("False positive");
 
     act(() => root?.unmount());
     root = null;
@@ -209,8 +210,9 @@ describe("IssueRecoveryActionCard", () => {
       <IssueRecoveryActionCard action={buildAction()} onResolve={onResolve} canCancelRecovery />,
     );
     click(second.querySelector("[data-testid='recovery-action-resolve-trigger']"));
-    expect(document.body.textContent).toContain("Mark false positive");
-    click([...document.body.querySelectorAll("button")].find((button) => button.textContent?.includes("Mark false positive")) ?? null);
-    expect(onResolve).toHaveBeenCalledWith("false_positive");
+    expect(document.body.textContent).toContain("False positive, done");
+    expect(document.body.textContent).toContain("False positive, review");
+    click([...document.body.querySelectorAll("button")].find((button) => button.textContent?.includes("False positive, done")) ?? null);
+    expect(onResolve).toHaveBeenCalledWith("false_positive_done");
   });
 });

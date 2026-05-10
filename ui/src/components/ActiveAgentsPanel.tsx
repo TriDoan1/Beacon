@@ -7,22 +7,16 @@ import type { TranscriptEntry } from "../adapters";
 import { issuesApi } from "../api/issues";
 import { queryKeys } from "../lib/queryKeys";
 import { cn, relativeTime } from "../lib/utils";
+import {
+  deriveActiveRecoveryDisplayState,
+  type ActiveRecoveryDisplayState,
+} from "../lib/recovery-display";
 import { Eye, ExternalLink, OctagonAlert, RefreshCw, TriangleAlert } from "lucide-react";
 import { Identity } from "./Identity";
 import { RunChatSurface } from "./RunChatSurface";
 import { useLiveRunTranscripts } from "./transcript/useLiveRunTranscripts";
 
-type RunCardRecoveryState = "needed" | "in_progress" | "observe_only" | "escalated";
-
-function runCardRecoveryStateFor(action: IssueRecoveryAction): RunCardRecoveryState | null {
-  if (action.status === "resolved" || action.status === "cancelled") return null;
-  if (action.status === "escalated") return "escalated";
-  if (action.kind === "active_run_watchdog") return "observe_only";
-  if (action.outcome === "delegated") return "in_progress";
-  return "needed";
-}
-
-const RUN_CARD_RECOVERY_TONE: Record<RunCardRecoveryState, { icon: typeof TriangleAlert; label: string; className: string }> = {
+const RUN_CARD_RECOVERY_TONE: Record<ActiveRecoveryDisplayState, { icon: typeof TriangleAlert; label: string; className: string }> = {
   needed: {
     icon: TriangleAlert,
     label: "Recovery needed",
@@ -46,7 +40,7 @@ const RUN_CARD_RECOVERY_TONE: Record<RunCardRecoveryState, { icon: typeof Triang
 };
 
 function RunCardRecoveryChip({ action }: { action: IssueRecoveryAction }) {
-  const state = runCardRecoveryStateFor(action);
+  const state = deriveActiveRecoveryDisplayState(action);
   if (!state) return null;
   const tone = RUN_CARD_RECOVERY_TONE[state];
   const Icon = tone.icon;
