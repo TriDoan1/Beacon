@@ -22,6 +22,7 @@ import {
   renderPaperclipWakePrompt,
   renderTemplate,
   resolvePaperclipDesiredSkillNames,
+  resolvePaperclipSpaceRootForAdapter,
   rewriteWorkspaceCwdEnvVarsForExecution,
   shapePaperclipWorkspaceEnvForExecution,
   stringifyPaperclipWakePayload,
@@ -115,7 +116,11 @@ function shortHash(value: unknown): string {
 function defaultPaperclipInstanceDir(): string {
   const home = process.env.PAPERCLIP_HOME?.trim() || path.join(os.homedir(), ".paperclip");
   const instanceId = process.env.PAPERCLIP_INSTANCE_ID?.trim() || "default";
-  return path.join(home, "instances", instanceId);
+  return resolvePaperclipSpaceRootForAdapter({
+    homeDir: home,
+    instanceId,
+    spaceId: process.env.PAPERCLIP_SPACE_ID?.trim() || undefined,
+  });
 }
 
 function defaultStateDir(companyId: string, agentId: string): string {
