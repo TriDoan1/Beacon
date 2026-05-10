@@ -27,7 +27,6 @@ export type RecoveryCardCardState =
 export type RecoveryResolveOutcome =
   | "done"
   | "in_review"
-  | "blocked"
   | "false_positive";
 
 export interface IssueRecoveryActionCardProps {
@@ -312,11 +311,6 @@ const RESOLVE_OPTIONS: Array<{
     outcome: "in_review",
     label: "Send for review",
     description: "Hand off to a reviewer with a real review path.",
-  },
-  {
-    outcome: "blocked",
-    label: "Mark blocked…",
-    description: "Resolve recovery by recording that the source issue is blocked.",
   },
   {
     outcome: "false_positive",

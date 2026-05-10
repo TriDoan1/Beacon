@@ -172,10 +172,23 @@ describe("IssueRecoveryActionCard", () => {
     click(node.querySelector("[data-testid='recovery-action-resolve-trigger']"));
 
     expect(document.body.textContent).toContain("Mark issue done");
+    expect(document.body.textContent).not.toContain("Mark blocked");
     expect(document.body.textContent).not.toContain("Delegate follow-up issue");
     click([...document.body.querySelectorAll("button")].find((button) => button.textContent?.includes("Mark issue done")) ?? null);
 
     expect(onResolve).toHaveBeenCalledWith("done");
+  });
+
+  it("does not offer blocked recovery resolution without a blocker selection flow", () => {
+    const node = render(
+      <IssueRecoveryActionCard action={buildAction()} onResolve={() => {}} canCancelRecovery />,
+    );
+    click(node.querySelector("[data-testid='recovery-action-resolve-trigger']"));
+
+    expect(document.body.textContent).toContain("Mark issue done");
+    expect(document.body.textContent).toContain("Send for review");
+    expect(document.body.textContent).toContain("Mark false positive");
+    expect(document.body.textContent).not.toContain("Mark blocked");
   });
 
   it("hides false_positive option unless canCancelRecovery is set", () => {

@@ -2,9 +2,16 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { activityLog, executionWorkspaces, issueExecutionDecisions, projectWorkspaces } from "@paperclipai/db";
+import {
+  activityLog,
+  executionWorkspaces,
+  issueExecutionDecisions,
+  issueRelations,
+  issues as issueRows,
+  projectWorkspaces,
+} from "@paperclipai/db";
 import {
   addIssueCommentSchema,
   acceptIssueThreadInteractionSchema,
@@ -1781,6 +1788,25 @@ export function issueRoutes(
     const actionStatus = outcome === "cancelled" ? "cancelled" : "resolved";
     const result = await db.transaction(async (tx) => {
       let issue = existing;
+      if (outcome === "blocked") {
+        const unresolvedBlockers = await tx
+          .select({ id: issueRows.id })
+          .from(issueRelations)
+          .innerJoin(issueRows, eq(issueRelations.issueId, issueRows.id))
+          .where(
+            and(
+              eq(issueRelations.companyId, existing.companyId),
+              eq(issueRelations.relatedIssueId, existing.id),
+              eq(issueRelations.type, "blocks"),
+              notInArray(issueRows.status, ["done", "cancelled"]),
+            ),
+          )
+          .limit(1);
+        if (unresolvedBlockers.length === 0) {
+          throw unprocessable("Blocked recovery resolution requires an unresolved first-class blocker on the source issue");
+        }
+      }
+
       if (sourceIssueStatus) {
         const updatedIssue = await svc.update(
           id,
